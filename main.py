@@ -55,6 +55,12 @@ PASS_TEST_NAMES = {
     "indefinido": "Indefinido",
 }
 
+BYPASS_EMOJIS = {
+    "si": "✅",
+    "no": "❌",
+    "indefinido": "➖",
+}
+
 OS_NAMES = {
     "windows": "Windows",
     "linux": "Linux",
@@ -870,6 +876,10 @@ async def handle_close_button(interaction):
         return
     now = int(time.time())
     database.close_ticket(ticket["id"], member.id, now)
+    creator = interaction.guild.get_member(ticket["user_id"])
+    if creator is not None:
+        await remove_cooldown_role(creator)
+    database.delete_cooldown(ticket["user_id"])
     await interaction.response.send_message("🔒 El ticket se cerrará en unos segundos.")
     await send_transcript(interaction.channel, ticket, member.id)
     await send_log(
@@ -998,11 +1008,11 @@ async def publish_bypass_result(interaction, session):
         user_text = "<@" + str(ticket["user_id"]) + ">"
     text = (
         "## Bypass Result\n"
-        "**User:** " + user_text + "\n"
-        "**Anonymous:** " + ("Sí" if session["anonymous_user"] == "si" else "No") + "\n"
-        "**SSER:** <@" + str(interaction.user.id) + ">\n\n"
-        "**Bypassed:** > " + PASS_TEST_NAMES[session["bypassed"]] + "\n\n"
-        "**Notas:**\n" + shorten_text(quote_text(session["notas"]), 1800)
+        "- **User:** " + user_text + "\n"
+        "- **Anonymous:** " + ("Sí" if session["anonymous_user"] == "si" else "No") + "\n"
+        "- **SSER:** <@" + str(interaction.user.id) + ">\n"
+        "- **Bypassed:** " + BYPASS_EMOJIS[session["bypassed"]] + "\n"
+        "- **Notas:**\n" + shorten_text(quote_text(session["notas"]), 1800)
     )
     proof_files = []
     for attachment in session["proofs"]:
