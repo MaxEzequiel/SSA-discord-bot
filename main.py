@@ -235,6 +235,36 @@ def get_highest_test_role_id(member):
     return 0
 
 
+def get_test_level_name(role_id):
+    if role_id == config.SS_ADVANCED_ROLE_ID:
+        return "Advanced"
+    if role_id == config.SS_MEDIUM_ROLE_ID:
+        return "Medium"
+    if role_id == config.SS_BASIC_ROLE_ID:
+        return "Basic"
+    return "User"
+
+
+def get_test_level_below(level_name):
+    if level_name == "Advanced":
+        return "Medium"
+    if level_name == "Medium":
+        return "Basic"
+    return "User"
+
+
+def get_new_test_level_name(current_name, session):
+    if session["pass_test"] == "si":
+        return DIFFICULTY_NAMES[session["difficulty"]]
+    if session.get("downgrade") == "si":
+        return get_test_level_below(current_name)
+    return current_name
+
+
+def build_public_result_text(user_id, current_name, new_name):
+    return "<@" + str(user_id) + "> " + current_name + " > " + new_name
+
+
 def get_week_start():
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=now.weekday())
@@ -885,6 +915,16 @@ async def publish_result(interaction, session):
             ephemeral=True,
         )
         return
+    public_channel = get_normal_channel(config.SS_RESULT_DISCORD_PUBLIC)
+    if public_channel is None:
+        await interaction.response.send_message(
+            "⚠️ No se encontró el canal público de resultados de SS. "
+            "Revisa SS_RESULT_DISCORD_PUBLIC en el .env (debe ser un canal del servidor).",
+            ephemeral=True,
+        )
+        return
+    current_level_name = get_test_level_name(get_highest_test_role_id(member))
+    new_level_name = get_new_test_level_name(current_level_name, session)
     embed = build_result_embed(
         ticket,
         member,
@@ -904,14 +944,15 @@ async def publish_result(interaction, session):
         ephemeral=True,
     )
     result_message = await results_channel.send(embed=embed)
-    proof_files = []
-    for attachment in session["proofs"]:
-        proof_files.append(await attachment.to_file())
-    await results_channel.send(
-        content="📎 Pruebas del test de <@" + str(ticket["user_id"]) + ">",
-        files=proof_files,
-        reference=result_message,
-    )
+    if len(session["proofs"]) > 0:
+        proof_files = []
+        for attachment in session["proofs"]:
+            proof_files.append(await attachment.to_file())
+        await results_channel.send(
+            content="📎 Pruebas del test de <@" + str(ticket["user_id"]) + ">",
+            files=proof_files,
+            reference=result_message,
+        )
     await send_log(
         channel.mention,
         ticket["user_id"],
@@ -927,6 +968,10 @@ async def publish_result(interaction, session):
         highest_role_id = get_highest_test_role_id(member)
         if highest_role_id != 0:
             await member.remove_roles(guild.get_role(highest_role_id))
+    if new_level_name != current_level_name:
+        await public_channel.send(
+            content=build_public_result_text(ticket["user_id"], current_level_name, new_level_name)
+        )
     seconds = get_result_cooldown_seconds(member)
     await close_ticket_with_cooldown(guild, channel, ticket, member, interaction.user.id, seconds)
 
@@ -1080,7 +1125,7 @@ async def handle_continue_result(interaction):
     session = result_sessions.get(interaction.channel_id)
     if session is None:
         await interaction.response.send_message(
-            "⚠️ No hay pruebas registradas en este ticket. Usa `!result` con las fotos.",
+            "⚠️ No hay pruebas registradas en este ticket. Usa `!result`.",
             ephemeral=True,
         )
         return
@@ -1109,7 +1154,7 @@ async def handle_finish_result(interaction):
     session = result_sessions.get(interaction.channel_id)
     if session is None:
         await interaction.response.send_message(
-            "⚠️ No hay pruebas registradas en este ticket. Usa `!result` con las fotos.",
+            "⚠️ No hay pruebas registradas en este ticket. Usa `!result`.",
             ephemeral=True,
         )
         return
@@ -1445,8 +1490,18 @@ async def result_command(ctx):
                 "Revisa RESULT_CHANNEL_ID en el .env.",
             )
             return
+        if config.SS_RESULT_DISCORD_PUBLIC == 0:
+            await send_error(ctx, "⚠️ El canal público de resultados de SS no está configurado en el .env.")
+            return
+        if get_normal_channel(config.SS_RESULT_DISCORD_PUBLIC) is None:
+            await send_error(
+                ctx,
+                "⚠️ No se encontró el canal público de resultados de SS en el servidor. "
+                "Revisa SS_RESULT_DISCORD_PUBLIC en el .env.",
+            )
+            return
     images = get_message_images(ctx.message)
-    if len(images) == 0:
+    if len(images) == 0 and ticket["difficulty"] == "bypass":
         await send_error(ctx, "⚠️ Adjunta las fotos de las pruebas en el mismo mensaje del comando.")
         return
     proof_files = []
@@ -1479,11 +1534,17 @@ async def result_command(ctx):
         "difficulty": ticket["difficulty"],
         "kind": "ss",
     }
-    await ctx.channel.send(
-        content="📎 **Pruebas subidas:** fotos de las pruebas\n<@" + str(ctx.author.id) + ">",
-        files=proof_files,
-        view=build_result_proofs_view(ctx.channel.id),
-    )
+    if len(images) == 0:
+        await ctx.channel.send(
+            content="🧪 **Test registrado sin pruebas**\n<@" + str(ctx.author.id) + ">",
+            view=build_result_proofs_view(ctx.channel.id),
+        )
+    else:
+        await ctx.channel.send(
+            content="📎 **Pruebas subidas:** fotos de las pruebas\n<@" + str(ctx.author.id) + ">",
+            files=proof_files,
+            view=build_result_proofs_view(ctx.channel.id),
+        )
     await send_log(
         ctx.channel.mention,
         ticket["user_id"],
