@@ -1008,11 +1008,10 @@ async def publish_bypass_result(interaction, session):
         user_text = "<@" + str(ticket["user_id"]) + ">"
     text = (
         "## Bypass Result\n"
-        "- **User:** " + user_text + "\n"
-        "- **Anonymous:** " + ("Sí" if session["anonymous_user"] == "si" else "No") + "\n"
-        "- **SSER:** <@" + str(interaction.user.id) + ">\n"
-        "- **Bypassed:** " + BYPASS_EMOJIS[session["bypassed"]] + "\n"
-        "- **Notas:**\n" + shorten_text(quote_text(session["notas"]), 1800)
+        "[»] **User:** " + user_text + "\n"
+        "[»] **SSER:** <@" + str(interaction.user.id) + ">\n"
+        "[»] **Bypassed:** " + BYPASS_EMOJIS[session["bypassed"]] + "\n"
+        "[»] **Notas:**\n" + shorten_text(quote_text(session["notas"]), 1800)
     )
     proof_files = []
     for attachment in session["proofs"]:
