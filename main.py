@@ -647,6 +647,16 @@ async def remove_cooldown_role(member):
     await member.remove_roles(cooldown_role)
 
 
+async def get_active_cooldown_message(member):
+    seconds_left = get_cooldown_seconds_left(member.id)
+    if seconds_left > 0:
+        return "⏳ Tienes un cooldown activo. Tiempo restante: " + format_remaining(seconds_left) + "."
+    if database.get_cooldown(member.id) is not None:
+        database.delete_cooldown(member.id)
+    await remove_cooldown_role(member)
+    return None
+
+
 async def expire_cooldown(user_id, seconds):
     await asyncio.sleep(seconds)
     for guild in bot.guilds:
@@ -678,17 +688,9 @@ async def handle_ss_request(interaction):
             ephemeral=True,
         )
         return
-    cooldown_role = member.get_role(config.COOLDOWN_ROLE_ID)
-    if cooldown_role is None:
-        if database.get_cooldown(member.id) is not None:
-            database.delete_cooldown(member.id)
-    else:
-        seconds_left = get_cooldown_seconds_left(member.id)
-        if seconds_left > 0:
-            text = "⏳ Tienes un cooldown activo. Tiempo restante: " + format_remaining(seconds_left) + "."
-        else:
-            text = "⏳ Tienes un cooldown activo."
-        await interaction.followup.send(text, ephemeral=True)
+    cooldown_message = await get_active_cooldown_message(member)
+    if cooldown_message is not None:
+        await interaction.followup.send(cooldown_message, ephemeral=True)
         return
     difficulty = get_difficulty_for_member(member)
     category = guild.get_channel(config.SS_TICKET_CATEGORY_ID)
@@ -775,12 +777,20 @@ async def handle_bypass_request(interaction):
             ephemeral=True,
         )
         return
+    cooldown_message = await get_active_cooldown_message(member)
+    if cooldown_message is not None:
+        await interaction.response.send_message(cooldown_message, ephemeral=True)
+        return
     await interaction.response.send_modal(BypassOpenForm(member))
 
 
 async def create_bypass_ticket(interaction, member, os_name, modified):
     guild = interaction.guild
     await interaction.response.defer(ephemeral=True)
+    cooldown_message = await get_active_cooldown_message(member)
+    if cooldown_message is not None:
+        await interaction.followup.send(cooldown_message, ephemeral=True)
+        return
     category = guild.get_channel(config.BYPASS_TICKET_CATEGORY_ID)
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
