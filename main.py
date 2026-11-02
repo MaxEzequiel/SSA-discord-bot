@@ -1011,6 +1011,8 @@ async def publish_bypass_result(interaction, session):
         "[»] **User:** " + user_text + "\n"
         "[»] **SSER:** <@" + str(interaction.user.id) + ">\n"
         "[»] **Bypassed:** " + BYPASS_EMOJIS[session["bypassed"]] + "\n"
+        "[»] **Sistema operativo:** " + OS_NAMES[ticket["os_name"]] + "\n"
+        "[»] **Sistema modificado:** " + MODIFIED_NAMES[ticket["modified"]] + "\n"
         "[»] **Notas:**\n" + shorten_text(quote_text(session["notas"]), 1800)
     )
     proof_files = []
