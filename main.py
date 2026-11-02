@@ -672,8 +672,12 @@ async def handle_ss_request(interaction):
             ephemeral=True,
         )
         return
-    seconds_left = get_cooldown_seconds_left(member.id)
-    if member.get_role(config.COOLDOWN_ROLE_ID) is not None or seconds_left > 0:
+    cooldown_role = member.get_role(config.COOLDOWN_ROLE_ID)
+    if cooldown_role is None:
+        if database.get_cooldown(member.id) is not None:
+            database.delete_cooldown(member.id)
+    else:
+        seconds_left = get_cooldown_seconds_left(member.id)
         if seconds_left > 0:
             text = "⏳ Tienes un cooldown activo. Tiempo restante: " + format_remaining(seconds_left) + "."
         else:
