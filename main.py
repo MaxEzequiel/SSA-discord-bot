@@ -1643,13 +1643,10 @@ async def remember_command(ctx):
 @bot.hybrid_command(name="cooldown", description="Muestra el cooldown de un usuario.")
 async def cooldown_command(ctx, target: str = None):
     await defer_if_interaction(ctx)
-    if is_staff(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
-        return
     if target is None:
-        await send_error(ctx, "Indica el ID o la mención del usuario. Ejemplo: `!cooldown @usuario`.")
-        return
-    user_id = parse_user_id(target)
+        user_id = ctx.author.id
+    else:
+        user_id = parse_user_id(target)
     member = ctx.guild.get_member(user_id)
     if member is None:
         embed = discord.Embed(title="Cooldown", description="No se encontró ese usuario en el servidor.", color=discord.Color.purple())
