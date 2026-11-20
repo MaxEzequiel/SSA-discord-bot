@@ -217,10 +217,17 @@ def quote_text(text):
 
 
 def get_result_cooldown_seconds(member):
-    seconds = parse_duration(config.TEST_COOLDOWN_TEXT.split())
-    if member.get_role(config.VIP_BOOSTER_ROLE_ID) is not None:
-        seconds = int(seconds * config.VIP_BOOSTER_MULTIPLIER)
-    return seconds
+    if member.get_role(config.BOOSTER_ROLE_ID) is not None:
+        return parse_duration(config.BOOSTER_COOLDOWN_TEXT.split())
+    staff_guild = bot.get_guild(config.STAFF_GUILD_ID)
+    if staff_guild is not None:
+        staff_member = staff_guild.get_member(member.id)
+        if staff_member is not None:
+            if staff_member.get_role(config.STAFF_MONTH_ROLE_ID) is not None:
+                return parse_duration(config.STAFF_MONTH_COOLDOWN_TEXT.split())
+    if member.get_role(config.VIP_ROLE_ID) is not None:
+        return parse_duration(config.VIP_COOLDOWN_TEXT.split())
+    return parse_duration(config.TEST_COOLDOWN_TEXT.split())
 
 
 def get_test_role_id(difficulty):
@@ -579,6 +586,7 @@ LOG_TITLES = {
     "Pruebas bypass subidas": ("📎", discord.Color.blue()),
     "Resultado SS publicado": ("📝", discord.Color.green()),
     "Resultado bypass publicado": ("📝", discord.Color.green()),
+    "Cooldown aplicado": ("⏳", discord.Color.purple()),
     "Cooldown removido": ("🧹", discord.Color.purple()),
     "Puntos bypass sumados": ("➕", discord.Color.orange()),
     "Puntos bypass restados": ("➖", discord.Color.orange()),
@@ -657,8 +665,11 @@ async def get_active_cooldown_message(member):
     return None
 
 
-async def expire_cooldown(user_id, seconds):
+async def expire_cooldown(user_id, seconds, cooldown_end):
     await asyncio.sleep(seconds)
+    row = database.get_cooldown(user_id)
+    if row is not None and row["cooldown_end"] > cooldown_end:
+        return
     for guild in bot.guilds:
         member = guild.get_member(user_id)
         if member is not None:
@@ -672,9 +683,9 @@ async def restore_cooldowns():
     for row in rows:
         remaining = row["cooldown_end"] - now
         if remaining > 0:
-            asyncio.create_task(expire_cooldown(row["user_id"], remaining))
+            asyncio.create_task(expire_cooldown(row["user_id"], remaining, row["cooldown_end"]))
         else:
-            await expire_cooldown(row["user_id"], 0)
+            await expire_cooldown(row["user_id"], 0, row["cooldown_end"])
 
 
 async def handle_ss_request(interaction):
@@ -908,7 +919,7 @@ async def close_ticket_with_cooldown(guild, channel, ticket, member, staff_id, s
     cooldown_role = guild.get_role(config.COOLDOWN_ROLE_ID)
     if member.get_role(config.COOLDOWN_ROLE_ID) is None:
         await member.add_roles(cooldown_role)
-    asyncio.create_task(expire_cooldown(ticket["user_id"], seconds))
+    asyncio.create_task(expire_cooldown(ticket["user_id"], seconds, cooldown_end))
     database.close_ticket(ticket["id"], staff_id, int(time.time()))
     await send_transcript(channel, ticket, staff_id)
     await send_log(
@@ -1704,6 +1715,45 @@ async def removecooldown_command(ctx, target: str = None):
         user_id,
         "Cooldown removido",
         "**Staff:** <@" + str(ctx.author.id) + ">\n**Terminaba:** " + format_date(old_end),
+    )
+
+
+@bot.hybrid_command(name="addcooldown", description="Aplica un cooldown a un usuario.")
+async def addcooldown_command(ctx, target: str = None, duration: str = None):
+    await defer_if_interaction(ctx)
+    if is_admin(ctx.author) == False:
+        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+        return
+    if target is None or duration is None:
+        await send_error(ctx, "Uso: `!addcooldown @usuario 7d`. Formatos válidos: `7d`, `12h`, `30m`.")
+        return
+    user_id = parse_user_id(target)
+    member = ctx.guild.get_member(user_id)
+    if member is None:
+        embed = discord.Embed(title="Aplicar cooldown", description="No se encontró ese usuario en el servidor.", color=discord.Color.purple())
+        await send_error(ctx, embed=embed)
+        return
+    seconds = parse_duration(duration.split())
+    if seconds <= 0:
+        await send_error(ctx, "La duración no es válida. Ejemplo: `!addcooldown @usuario 7d`.")
+        return
+    cooldown_end = int(time.time()) + seconds
+    database.set_cooldown(user_id, cooldown_end)
+    if member.get_role(config.COOLDOWN_ROLE_ID) is None:
+        cooldown_role = ctx.guild.get_role(config.COOLDOWN_ROLE_ID)
+        await member.add_roles(cooldown_role)
+    asyncio.create_task(expire_cooldown(user_id, seconds, cooldown_end))
+    embed = discord.Embed(title="Aplicar cooldown", color=discord.Color.purple())
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="Usuario", value=member.mention, inline=False)
+    embed.add_field(name="⏳ Tiempo aplicado", value=format_remaining(seconds), inline=True)
+    embed.add_field(name="📅 Termina", value=format_date(cooldown_end), inline=True)
+    await ctx.send(embed=embed)
+    await send_log(
+        "Ninguno",
+        user_id,
+        "Cooldown aplicado",
+        "**Staff:** <@" + str(ctx.author.id) + ">\n**Duración:** " + format_remaining(seconds),
     )
 
 
