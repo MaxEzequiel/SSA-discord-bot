@@ -1340,6 +1340,8 @@ async def on_raw_reaction_add(payload):
 
 @bot.event
 async def setup_hook():
+    global_commands = await bot.tree.sync()
+    print("Comandos globales sincronizados: " + str(len(global_commands)))
     synced = await bot.tree.sync(guild=discord.Object(id=config.GUILD_ID))
     print("Comandos sincronizados en el servidor normal: " + str(len(synced)))
     for command in synced:
