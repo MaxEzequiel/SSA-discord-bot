@@ -1843,6 +1843,32 @@ async def activity_command(ctx):
     await send_activity_report(ctx.channel)
 
 
+@bot.hybrid_command(name="clear", description="Elimina una cantidad de mensajes del canal actual.")
+async def clear_command(ctx, number: int = None):
+    await defer_if_interaction(ctx)
+    normal_guild = get_normal_guild()
+    normal_member = None
+    if normal_guild is not None:
+        normal_member = normal_guild.get_member(ctx.author.id)
+    if normal_member is None:
+        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+        return
+    if is_admin(normal_member) == False:
+        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+        return
+    if number is None:
+        await send_error(ctx, "⚠️ Uso: `!clear <número>` (máximo 50).")
+        return
+    if number < 1:
+        await send_error(ctx, "⚠️ El número tiene que ser mayor a 0.")
+        return
+    if number > 50:
+        await send_error(ctx, "⚠️ El máximo es 50 mensajes.")
+        return
+    deleted = await ctx.channel.purge(limit=number)
+    await send_private(ctx, "🧹 Se eliminaron " + str(len(deleted)) + " mensajes.")
+
+
 database.init_database()
 
 if __name__ == "__main__":
