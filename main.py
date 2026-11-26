@@ -424,6 +424,7 @@ def build_ticket_view(claim_disabled):
 
 def build_result_text(ticket, tester_id, difficulty, cheat, bypass_text, encontro, notas, cosas_encontradas, razonamiento, puntaje, pass_test_name):
     difficulty_name = DIFFICULTY_NAMES[difficulty]
+    timestamp = "<t:" + str(int(time.time())) + ">"
     text = (
         "## Resultado del test · " + difficulty_name + "\n\n"
         "- Tag User: <@" + str(ticket["user_id"]) + ">\n"
@@ -431,13 +432,13 @@ def build_result_text(ticket, tester_id, difficulty, cheat, bypass_text, encontr
         "- Apply: " + difficulty_name + "\n"
         "- Puntaje: " + shorten_text(puntaje, 50) + "\n"
         "- Pasa la test: " + pass_test_name + "\n\n"
-        "- **Cheat:**\n\n" + shorten_text(quote_text(cheat), 250) + "\n\n"
-        "- **Bypass:**\n\n" + shorten_text(quote_text(bypass_text), 250) + "\n\n"
+        "- **Cheat:**\n" + shorten_text(quote_text(cheat), 250) + "\n\n"
+        "- **Bypass:**\n" + shorten_text(quote_text(bypass_text), 250) + "\n\n"
         "- **Encontró:**\n" + shorten_text(encontro, 100) + "\n\n"
         "- **Cosas encontradas:**\n" + shorten_text(quote_text(cosas_encontradas), 100) + "\n\n"
         "- **Notas:**\n" + shorten_text(quote_text(notas), 250) + "\n\n"
         "- **Razonamiento:**\n" + shorten_text(quote_text(razonamiento), 250) + "\n\n"
-        "Resultado registrado el " + format_date(int(time.time()))
+        "Resultado registrado el " + timestamp
     )
     return text
 
