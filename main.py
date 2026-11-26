@@ -19,6 +19,11 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 
+COMMAND_GUILDS = [
+    discord.Object(id=config.GUILD_ID),
+    discord.Object(id=config.STAFF_GUILD_ID),
+]
+
 cooldowns_restored = False
 
 DIFFICULTY_NAMES = {
@@ -1357,6 +1362,7 @@ async def on_ready():
 
 
 @bot.tree.command(name="setupss", description="Publica el panel de SS Request.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 async def setupss_command(interaction):
     if is_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
@@ -1377,6 +1383,7 @@ async def setupss_command(interaction):
 
 
 @bot.tree.command(name="setupbypass", description="Publica el panel de Bypass Request.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 async def setupbypass_command(interaction):
     if is_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
@@ -1403,6 +1410,7 @@ async def setupbypass_command(interaction):
 
 
 @bot.tree.command(name="bypassban", description="Banea a un usuario de abrir tickets de bypass.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 @discord.app_commands.describe(usuario="Usuario a banear de los tickets de bypass")
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def bypassban_command(interaction, usuario: str):
@@ -1421,6 +1429,7 @@ async def bypassban_command(interaction, usuario: str):
 
 
 @bot.tree.command(name="bypassunban", description="Quita el ban de bypass a un usuario.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 @discord.app_commands.describe(usuario="Usuario al que se le quita el ban de bypass")
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def bypassunban_command(interaction, usuario: str):
@@ -1439,12 +1448,14 @@ async def bypassunban_command(interaction, usuario: str):
 
 
 @bot.tree.command(name="bypasstop", description="Muestra el top de los mejores bypassers.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 async def bypasstop_command(interaction):
     embed = build_bypasstop_embed(interaction.guild, interaction.user.id)
     await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(name="points", description="Administra los puntos de bypass y de SS.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 @discord.app_commands.describe(
     tipo="Tipo de puntos",
     accion="Sumar o restar puntos",
@@ -1617,6 +1628,7 @@ async def save_result_proofs(interaction, ticket, proofs):
 
 
 @bot.tree.command(name="result", description="Registra las pruebas del test y abre el formulario del resultado.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 async def result_command(interaction):
     if is_staff(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
@@ -1661,6 +1673,7 @@ async def result_command(interaction):
 
 
 @bot.tree.command(name="unclaim", description="Retira el claim del ticket actual.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 async def unclaim_command(interaction):
     if is_staff(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
@@ -1703,6 +1716,7 @@ async def unclaim_command(interaction):
 
 
 @bot.tree.command(name="remember", description="Envía un recordatorio por MD al creador del ticket.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 async def remember_command(interaction):
     if is_staff(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
@@ -1719,6 +1733,7 @@ async def remember_command(interaction):
 
 
 @bot.tree.command(name="cooldown", description="Muestra el cooldown de un usuario.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 @discord.app_commands.describe(usuario="Usuario a consultar (por defecto sos vos)")
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def cooldown_command(interaction, usuario: str = None):
@@ -1750,6 +1765,7 @@ async def cooldown_command(interaction, usuario: str = None):
 
 
 @bot.tree.command(name="removecooldown", description="Quita el cooldown de un usuario.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 @discord.app_commands.describe(usuario="Usuario al que se le quita el cooldown")
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def removecooldown_command(interaction, usuario: str):
@@ -1791,6 +1807,7 @@ async def removecooldown_command(interaction, usuario: str):
 
 
 @bot.tree.command(name="addcooldown", description="Aplica un cooldown a un usuario.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 @discord.app_commands.describe(
     usuario="Usuario al que se le aplica el cooldown",
     duracion="Duración del cooldown: 7d, 12h, 30m",
@@ -1849,6 +1866,7 @@ async def daily_activity_task():
 
 
 @bot.tree.command(name="actividad", description="Muestra la actividad del staff.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 async def activity_command(interaction):
     if interaction.guild_id != config.STAFF_GUILD_ID:
         if is_staff(interaction.user) == False:
@@ -1860,6 +1878,7 @@ async def activity_command(interaction):
 
 
 @bot.tree.command(name="clear", description="Elimina una cantidad de mensajes del canal actual.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
 @discord.app_commands.describe(numero="Cantidad de mensajes a eliminar (máximo 50)")
 async def clear_command(interaction, numero: int):
     normal_guild = get_normal_guild()
