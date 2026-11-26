@@ -37,18 +37,6 @@ DIFFICULTY_POINTS = {
 
 MAX_WITHOUT_POINTS = 5
 
-RESULT_COLORS = {
-    "basic": discord.Color.green(),
-    "medium": discord.Color.blue(),
-    "advanced": discord.Color.purple(),
-}
-
-RESULT_DIFFICULTY_NAMES = {
-    "basic": "Basic",
-    "medium": "Medium",
-    "advanced": "Advanced",
-}
-
 PASS_TEST_NAMES = {
     "si": "Sí",
     "no": "No",
@@ -217,6 +205,8 @@ def quote_text(text):
 
 
 def get_result_cooldown_seconds(member):
+    if member is None:
+        return parse_duration(config.TEST_COOLDOWN_TEXT.split())
     if member.get_role(config.BOOSTER_ROLE_ID) is not None:
         return parse_duration(config.BOOSTER_COOLDOWN_TEXT.split())
     staff_guild = bot.get_guild(config.STAFF_GUILD_ID)
@@ -239,6 +229,8 @@ def get_test_role_id(difficulty):
 
 
 def get_highest_test_role_id(member):
+    if member is None:
+        return 0
     if member.get_role(config.SS_ADVANCED_ROLE_ID) is not None:
         return config.SS_ADVANCED_ROLE_ID
     if member.get_role(config.SS_MEDIUM_ROLE_ID) is not None:
@@ -430,28 +422,24 @@ def build_ticket_view(claim_disabled):
     return view
 
 
-def build_result_embed(ticket, member, tester_id, difficulty, cheat, bypass_text, encontro, notas, cosas_encontradas, razonamiento, puntaje, pass_test_name):
-    difficulty_name = RESULT_DIFFICULTY_NAMES[difficulty]
-    embed = discord.Embed(
-        title="Resultado del test · " + difficulty_name,
-        color=RESULT_COLORS[difficulty],
+def build_result_text(ticket, tester_id, difficulty, cheat, bypass_text, encontro, notas, cosas_encontradas, razonamiento, puntaje, pass_test_name):
+    difficulty_name = DIFFICULTY_NAMES[difficulty]
+    text = (
+        "## Resultado del test · " + difficulty_name + "\n\n"
+        "- Tag User: <@" + str(ticket["user_id"]) + ">\n"
+        "- Tester: <@" + str(tester_id) + ">\n"
+        "- Apply: " + difficulty_name + "\n"
+        "- Puntaje: " + shorten_text(puntaje, 50) + "\n"
+        "- Pasa la test: " + pass_test_name + "\n\n"
+        "- **Cheat:**\n\n" + shorten_text(quote_text(cheat), 250) + "\n\n"
+        "- **Bypass:**\n\n" + shorten_text(quote_text(bypass_text), 250) + "\n\n"
+        "- **Encontró:**\n" + shorten_text(encontro, 100) + "\n\n"
+        "- **Cosas encontradas:**\n" + shorten_text(quote_text(cosas_encontradas), 100) + "\n\n"
+        "- **Notas:**\n" + shorten_text(quote_text(notas), 250) + "\n\n"
+        "- **Razonamiento:**\n" + shorten_text(quote_text(razonamiento), 250) + "\n\n"
+        "Resultado registrado el " + format_date(int(time.time()))
     )
-    embed.set_author(name=member.name, icon_url=member.display_avatar.url)
-    embed.description = (
-        "**Tag User:** <@" + str(ticket["user_id"]) + ">\n"
-        "**Tester:** <@" + str(tester_id) + ">\n"
-        "**Apply:** " + difficulty_name + "\n"
-        "**Puntaje:** " + shorten_text(puntaje, 100) + "\n"
-        "**Pasa la test:** " + pass_test_name
-    )
-    embed.add_field(name="- Cheat", value=shorten_text(quote_text(cheat), 1024), inline=False)
-    embed.add_field(name="- Bypass", value=shorten_text(quote_text(bypass_text), 1024), inline=False)
-    embed.add_field(name="- Encontró", value=shorten_text(quote_text(encontro), 1024), inline=True)
-    embed.add_field(name="- Cosas encontradas", value=shorten_text(quote_text(cosas_encontradas), 1024), inline=True)
-    embed.add_field(name="- Notas", value=shorten_text(quote_text(notas), 1024), inline=False)
-    embed.add_field(name="- Razonamiento", value=shorten_text(quote_text(razonamiento), 1024), inline=False)
-    embed.set_footer(text="Resultado registrado el " + format_date(int(time.time())))
-    return embed
+    return text
 
 
 def build_result_proofs_view(channel_id):
@@ -917,8 +905,9 @@ async def close_ticket_with_cooldown(guild, channel, ticket, member, staff_id, s
     cooldown_end = int(time.time()) + seconds
     database.set_cooldown(ticket["user_id"], cooldown_end)
     cooldown_role = guild.get_role(config.COOLDOWN_ROLE_ID)
-    if member.get_role(config.COOLDOWN_ROLE_ID) is None:
-        await member.add_roles(cooldown_role)
+    if member is not None:
+        if member.get_role(config.COOLDOWN_ROLE_ID) is None:
+            await member.add_roles(cooldown_role)
     asyncio.create_task(expire_cooldown(ticket["user_id"], seconds, cooldown_end))
     database.close_ticket(ticket["id"], staff_id, int(time.time()))
     await send_transcript(channel, ticket, staff_id)
@@ -950,8 +939,7 @@ async def publish_result(interaction, session):
             ephemeral=True,
         )
         return
-    public_channel = get_normal_channel(config.SS_RESULT_DISCORD_PUBLIC)
-    if public_channel is None:
+    if get_normal_channel(config.SS_RESULT_DISCORD_PUBLIC) is None:
         await interaction.response.send_message(
             "⚠️ No se encontró el canal público de resultados de SS. "
             "Revisa SS_RESULT_DISCORD_PUBLIC en el .env (debe ser un canal del servidor).",
@@ -960,9 +948,8 @@ async def publish_result(interaction, session):
         return
     current_level_name = get_test_level_name(get_highest_test_role_id(member))
     new_level_name = get_new_test_level_name(current_level_name, session)
-    embed = build_result_embed(
+    text = build_result_text(
         ticket,
-        member,
         session["tester_id"],
         session["difficulty"],
         session["cheat"],
@@ -975,40 +962,108 @@ async def publish_result(interaction, session):
         PASS_TEST_NAMES[session["pass_test"]],
     )
     await interaction.response.send_message(
-        "✅ Resultado publicado y ticket cerrado.",
+        "✅ Resultado publicado. Queda pendiente la aprobación de un admin o superior.",
         ephemeral=True,
     )
-    result_message = await results_channel.send(embed=embed)
-    if len(session["proofs"]) > 0:
-        proof_files = []
-        for attachment in session["proofs"]:
-            proof_files.append(await attachment.to_file())
-        await results_channel.send(
-            content="📎 Pruebas del test de <@" + str(ticket["user_id"]) + ">",
-            files=proof_files,
-            reference=result_message,
-        )
+    proof_files = []
+    for attachment in session["proofs"]:
+        proof_files.append(await attachment.to_file())
+    if len(proof_files) > 0:
+        result_message = await results_channel.send(content=text, files=proof_files)
+    else:
+        result_message = await results_channel.send(content=text)
+    await result_message.add_reaction("✅")
+    await result_message.add_reaction("❌")
+    database.create_pending_result(
+        result_message.id,
+        results_channel.id,
+        channel.id,
+        ticket["user_id"],
+        session["tester_id"],
+        session["difficulty"],
+        session["pass_test"],
+        session.get("downgrade"),
+        current_level_name,
+        new_level_name,
+        int(time.time()),
+    )
     await send_log(
         channel.mention,
         ticket["user_id"],
         "Resultado SS publicado",
         "**Staff:** <@" + str(interaction.user.id) + ">\n"
         "**Dificultad:** " + DIFFICULTY_NAMES[ticket["difficulty"]] + "\n"
-        "**Pasa la test:** " + PASS_TEST_NAMES[session["pass_test"]],
+        "**Pasa la test:** " + PASS_TEST_NAMES[session["pass_test"]] + "\n"
+        "**Estado:** Pendiente de aprobación",
     )
-    if session["pass_test"] == "si":
-        test_role = guild.get_role(get_test_role_id(session["difficulty"]))
+    seconds = get_result_cooldown_seconds(member)
+    await close_ticket_with_cooldown(guild, channel, ticket, member, interaction.user.id, seconds)
+
+
+async def apply_result_rank(pending):
+    guild = get_normal_guild()
+    if guild is None:
+        return
+    member = guild.get_member(pending["user_id"])
+    if member is None:
+        return
+    if pending["pass_test"] == "si":
+        test_role = guild.get_role(get_test_role_id(pending["difficulty"]))
         await member.add_roles(test_role)
-    if session.get("downgrade") == "si":
+    if pending["downgrade"] == "si":
         highest_role_id = get_highest_test_role_id(member)
         if highest_role_id != 0:
             await member.remove_roles(guild.get_role(highest_role_id))
-    if new_level_name != current_level_name:
-        await public_channel.send(
-            content=build_public_result_text(ticket["user_id"], current_level_name, new_level_name)
-        )
-    seconds = get_result_cooldown_seconds(member)
-    await close_ticket_with_cooldown(guild, channel, ticket, member, interaction.user.id, seconds)
+
+
+async def send_public_result(user_id, current_level, new_level):
+    if current_level == new_level:
+        return
+    public_channel = get_normal_channel(config.SS_RESULT_DISCORD_PUBLIC)
+    if public_channel is None:
+        return
+    await public_channel.send(content=build_public_result_text(user_id, current_level, new_level))
+
+
+async def handle_result_reaction(payload):
+    if payload.guild_id != config.STAFF_GUILD_ID:
+        return
+    if payload.user_id == bot.user.id:
+        return
+    emoji = str(payload.emoji)
+    if emoji != "✅" and emoji != "❌":
+        return
+    pending = database.get_pending_result_by_message(payload.message_id)
+    if pending is None:
+        return
+    if pending["status"] != "pendiente":
+        return
+    normal_guild = get_normal_guild()
+    if normal_guild is None:
+        return
+    staff_member = normal_guild.get_member(payload.user_id)
+    if staff_member is None:
+        return
+    if is_admin(staff_member) == False:
+        return
+    channel = bot.get_channel(payload.channel_id)
+    if channel is None:
+        return
+    message = await channel.fetch_message(payload.message_id)
+    now = int(time.time())
+    if emoji == "✅":
+        await apply_result_rank(pending)
+        await send_public_result(pending["user_id"], pending["current_level"], pending["new_level"])
+        database.set_pending_result_status(pending["id"], "aprobado", staff_member.id, now)
+        rank_text = "Sin cambio de rango."
+        if pending["current_level"] != pending["new_level"]:
+            rank_text = "Rango aplicado: " + pending["current_level"] + " > " + pending["new_level"]
+        approval_text = "\n\n✅ Aprobado por <@" + str(staff_member.id) + "> — " + rank_text
+        await message.edit(content=message.content + approval_text)
+        return
+    database.set_pending_result_status(pending["id"], "rechazado", staff_member.id, now)
+    approval_text = "\n\n❌ Rechazado por <@" + str(staff_member.id) + "> — No se aplicó ningún rango."
+    await message.edit(content=message.content + approval_text)
 
 
 async def publish_bypass_result(interaction, session):
@@ -1283,6 +1338,11 @@ async def on_interaction(interaction):
         await handle_continue_result(interaction)
     if custom_id.startswith("finish_bypass_"):
         await handle_finish_bypass_result(interaction)
+
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    await handle_result_reaction(payload)
 
 
 @bot.event

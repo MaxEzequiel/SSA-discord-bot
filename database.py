@@ -57,6 +57,24 @@ def init_database():
         "user_id INTEGER PRIMARY KEY, "
         "points INTEGER)"
     )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS pending_results ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "message_id INTEGER, "
+        "channel_id INTEGER, "
+        "ticket_channel_id INTEGER, "
+        "user_id INTEGER, "
+        "tester_id INTEGER, "
+        "difficulty TEXT, "
+        "pass_test TEXT, "
+        "downgrade TEXT, "
+        "current_level TEXT, "
+        "new_level TEXT, "
+        "status TEXT, "
+        "decided_by INTEGER, "
+        "decided_at INTEGER, "
+        "created_at INTEGER)"
+    )
     connection.commit()
 
 
@@ -273,3 +291,60 @@ def create_transcript(ticket_id, channel_name, created_at):
     )
     connection.commit()
     return cursor.lastrowid
+
+
+def create_pending_result(
+    message_id,
+    channel_id,
+    ticket_channel_id,
+    user_id,
+    tester_id,
+    difficulty,
+    pass_test,
+    downgrade,
+    current_level,
+    new_level,
+    created_at,
+):
+    cursor = connection.cursor()
+    cursor.execute(
+        "INSERT INTO pending_results ("
+        "message_id, channel_id, ticket_channel_id, user_id, tester_id, "
+        "difficulty, pass_test, downgrade, current_level, new_level, "
+        "status, decided_by, decided_at, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+        (
+            message_id,
+            channel_id,
+            ticket_channel_id,
+            user_id,
+            tester_id,
+            difficulty,
+            pass_test,
+            downgrade,
+            current_level,
+            new_level,
+            "pendiente",
+            created_at,
+        ),
+    )
+    connection.commit()
+    return cursor.lastrowid
+
+
+def get_pending_result_by_message(message_id):
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT * FROM pending_results WHERE message_id = ? ORDER BY id DESC",
+        (message_id,),
+    )
+    return cursor.fetchone()
+
+
+def set_pending_result_status(result_id, status, decided_by, decided_at):
+    cursor = connection.cursor()
+    cursor.execute(
+        "UPDATE pending_results SET status = ?, decided_by = ?, decided_at = ? WHERE id = ?",
+        (status, decided_by, decided_at, result_id),
+    )
+    connection.commit()
