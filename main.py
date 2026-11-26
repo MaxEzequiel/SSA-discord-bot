@@ -1334,6 +1334,18 @@ async def on_raw_reaction_add(payload):
 
 
 @bot.event
+async def setup_hook():
+    synced = await bot.tree.sync(guild=discord.Object(id=config.GUILD_ID))
+    print("Comandos sincronizados en el servidor normal: " + str(len(synced)))
+    for command in synced:
+        print("  /" + command.name)
+    synced = await bot.tree.sync(guild=discord.Object(id=config.STAFF_GUILD_ID))
+    print("Comandos sincronizados en el servidor de staff: " + str(len(synced)))
+    for command in synced:
+        print("  /" + command.name)
+
+
+@bot.event
 async def on_ready():
     global cooldowns_restored
     if cooldowns_restored == True:
@@ -1341,8 +1353,6 @@ async def on_ready():
     cooldowns_restored = True
     await restore_cooldowns()
     daily_activity_task.start()
-    await bot.tree.sync(guild=discord.Object(id=config.GUILD_ID))
-    await bot.tree.sync(guild=discord.Object(id=config.STAFF_GUILD_ID))
     print("Bot conectado como " + str(bot.user))
 
 
