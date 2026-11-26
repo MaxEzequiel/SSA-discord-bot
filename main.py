@@ -17,7 +17,7 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 
 cooldowns_restored = False
 
@@ -72,23 +72,11 @@ def has_any_role(member, role_ids):
     return False
 
 
-async def send_private(ctx, text=None, embed=None):
-    if ctx.interaction is not None:
-        if ctx.interaction.response.is_done():
-            await ctx.interaction.followup.send(text, embed=embed, ephemeral=True)
-        else:
-            await ctx.interaction.response.send_message(text, embed=embed, ephemeral=True)
+async def send_ephemeral(interaction, text=None, embed=None):
+    if interaction.response.is_done():
+        await interaction.followup.send(text, embed=embed, ephemeral=True)
         return
-    await ctx.send(text, embed=embed, delete_after=10)
-
-
-async def send_error(ctx, text=None, embed=None):
-    await send_private(ctx, text, embed)
-
-
-async def defer_if_interaction(ctx):
-    if ctx.interaction is not None:
-        await ctx.interaction.response.defer(ephemeral=True)
+    await interaction.response.send_message(text, embed=embed, ephemeral=True)
 
 
 def is_staff(member):
@@ -103,9 +91,17 @@ def can_manage_points(member):
     return has_any_role(member, config.POINTS_ROLE_IDS)
 
 
-def parse_user_id(text):
-    cleaned = text.replace("<@", "").replace(">", "").replace("!", "")
-    return int(cleaned)
+async def member_autocomplete(interaction, current):
+    choices = []
+    current_lower = current.lower()
+    for member in interaction.guild.members:
+        if current_lower in member.name.lower():
+            choices.append(discord.app_commands.Choice(name=member.name, value=str(member.id)))
+        elif current_lower in member.display_name.lower():
+            choices.append(discord.app_commands.Choice(name=member.name, value=str(member.id)))
+        if len(choices) == 25:
+            break
+    return choices
 
 
 def get_normal_guild():
@@ -179,15 +175,6 @@ def parse_duration(args):
         if unit == "m":
             total = total + amount * 60
     return total
-
-
-def get_message_images(message):
-    images = []
-    for attachment in message.attachments:
-        if attachment.content_type is not None:
-            if attachment.content_type.startswith("image/"):
-                images.append(attachment)
-    return images
 
 
 def shorten_text(text, length):
@@ -1217,13 +1204,13 @@ async def handle_continue_result(interaction):
     session = result_sessions.get(interaction.channel_id)
     if session is None:
         await interaction.response.send_message(
-            "⚠️ No hay pruebas registradas en este ticket. Usa `!result`.",
+            "⚠️ No hay pruebas registradas en este ticket. Usa `/result`.",
             ephemeral=True,
         )
         return
     if session["tester_id"] != interaction.user.id:
         await interaction.response.send_message(
-            "🚫 Solo quien ejecutó `!result` puede abrir este formulario.",
+            "🚫 Solo quien ejecutó `/result` puede abrir este formulario.",
             ephemeral=True,
         )
         return
@@ -1246,13 +1233,13 @@ async def handle_finish_result(interaction):
     session = result_sessions.get(interaction.channel_id)
     if session is None:
         await interaction.response.send_message(
-            "⚠️ No hay pruebas registradas en este ticket. Usa `!result`.",
+            "⚠️ No hay pruebas registradas en este ticket. Usa `/result`.",
             ephemeral=True,
         )
         return
     if session["tester_id"] != interaction.user.id:
         await interaction.response.send_message(
-            "🚫 Solo quien ejecutó `!result` puede abrir este formulario.",
+            "🚫 Solo quien ejecutó `/result` puede abrir este formulario.",
             ephemeral=True,
         )
         return
@@ -1307,13 +1294,13 @@ async def handle_finish_bypass_result(interaction):
     session = result_sessions.get(interaction.channel_id)
     if session is None:
         await interaction.response.send_message(
-            "⚠️ No hay pruebas registradas en este ticket. Usa `!result` con las fotos.",
+            "⚠️ No hay pruebas registradas en este ticket. Usa `/result` y subí las fotos.",
             ephemeral=True,
         )
         return
     if session["tester_id"] != interaction.user.id:
         await interaction.response.send_message(
-            "🚫 Solo quien ejecutó `!result` puede abrir este formulario.",
+            "🚫 Solo quien ejecutó `/result` puede abrir este formulario.",
             ephemeral=True,
         )
         return
@@ -1359,318 +1346,328 @@ async def on_ready():
     print("Bot conectado como " + str(bot.user))
 
 
-@bot.hybrid_command(name="setupss", description="Publica el panel de SS Request.")
-async def setupss_command(ctx):
-    await defer_if_interaction(ctx)
-    if is_admin(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+@bot.tree.command(name="setupss", description="Publica el panel de SS Request.")
+async def setupss_command(interaction):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
-    if ctx.channel.id != config.SS_GUIDE_CHANNEL_ID:
-        await send_error(ctx, "🚫 Este comando solo funciona en el canal de guía de SS.")
+    if interaction.channel.id != config.SS_GUIDE_CHANNEL_ID:
+        await send_ephemeral(interaction, "🚫 Este comando solo funciona en el canal de guía de SS.")
         return
-    existing = await get_setup_message(ctx.channel)
+    existing = await get_setup_message(interaction.channel)
     if existing is not None:
-        await send_error(ctx, "⚠️ Ya hay un embed de SS Request publicado en este canal.")
+        await send_ephemeral(interaction, "⚠️ Ya hay un embed de SS Request publicado en este canal.")
         return
-    await ctx.send(embed=build_setup_embed(), view=build_setup_view())
-    category = ctx.guild.get_channel(config.SS_TICKET_CATEGORY_ID)
-    await send_private(ctx, "✅ Embed publicado. Los tickets se crearán en la categoría **" + category.name + "**.")
-
-
-@bot.hybrid_command(name="setupbypass", description="Publica el panel de Bypass Request.")
-async def setupbypass_command(ctx):
-    await defer_if_interaction(ctx)
-    if is_admin(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
-        return
-    if config.BYPASS_CHANNEL_ID == 0:
-        await send_error(ctx, "⚠️ El canal de bypass no está configurado en el .env.")
-        return
-    if config.BYPASS_TICKET_CATEGORY_ID == 0:
-        await send_error(ctx, "⚠️ La categoría de tickets de bypass no está configurada en el .env.")
-        return
-    if ctx.channel.id != config.BYPASS_CHANNEL_ID:
-        await send_error(ctx, "🚫 Este comando solo funciona en el canal de bypass.")
-        return
-    existing = await get_bypass_setup_message(ctx.channel)
-    if existing is not None:
-        await send_error(ctx, "⚠️ Ya hay un embed de Bypass Request publicado en este canal.")
-        return
-    await ctx.send(embed=build_bypass_setup_embed(), view=build_bypass_setup_view())
-    category = ctx.guild.get_channel(config.BYPASS_TICKET_CATEGORY_ID)
-    await send_private(ctx, "✅ Embed publicado. Los tickets se crearán en la categoría **" + category.name + "**.")
-
-
-@bot.hybrid_command(name="bypassban", description="Banea a un usuario de abrir tickets de bypass.")
-async def bypassban_command(ctx, target: str = None):
-    await defer_if_interaction(ctx)
-    if is_admin(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
-        return
-    if target is None:
-        await send_error(ctx, "Indica el ID o la mención del usuario. Ejemplo: `!bypassban 123456789`.")
-        return
-    user_id_text = target.replace("<@", "").replace(">", "").replace("!", "")
-    user_id = int(user_id_text)
-    if database.is_bypass_banned(user_id) == True:
-        await send_error(ctx, "⚠️ Ese usuario ya está baneado de los tickets de bypass.")
-        return
-    database.add_bypass_ban(user_id)
-    await ctx.send("✅ Usuario <@" + str(user_id) + "> baneado de los tickets de bypass.")
-
-
-@bot.hybrid_command(name="bypassunban", description="Quita el ban de bypass a un usuario.")
-async def bypassunban_command(ctx, target: str = None):
-    await defer_if_interaction(ctx)
-    if is_admin(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
-        return
-    if target is None:
-        await send_error(ctx, "Indica el ID o la mención del usuario. Ejemplo: `!bypassunban 123456789`.")
-        return
-    user_id_text = target.replace("<@", "").replace(">", "").replace("!", "")
-    user_id = int(user_id_text)
-    if database.is_bypass_banned(user_id) == False:
-        await send_error(ctx, "⚠️ Ese usuario no está baneado de los tickets de bypass.")
-        return
-    database.remove_bypass_ban(user_id)
-    await ctx.send("✅ Usuario <@" + str(user_id) + "> desbaneado de los tickets de bypass.")
-
-
-@bot.hybrid_command(name="bypasstop", description="Muestra el top de los mejores bypassers.")
-async def bypasstop_command(ctx):
-    await defer_if_interaction(ctx)
-    embed = build_bypasstop_embed(ctx.guild, ctx.author.id)
-    await ctx.send(embed=embed)
-
-
-@bot.group(name="points", description="Administra los puntos de bypass y de SS.", invoke_without_command=True)
-async def points_command(ctx):
-    await ctx.send(
-        "Usa `!points bypass add @usuario 5`, `!points bypass remove @usuario 5`, "
-        "`!points ss add @usuario 5` o `!points ss remove @usuario 5`."
+    await interaction.response.send_message(embed=build_setup_embed(), view=build_setup_view())
+    category = interaction.guild.get_channel(config.SS_TICKET_CATEGORY_ID)
+    await interaction.followup.send(
+        "✅ Embed publicado. Los tickets se crearán en la categoría **" + category.name + "**.",
+        ephemeral=True,
     )
 
 
-@points_command.group(name="bypass", invoke_without_command=True)
-async def points_bypass_group(ctx):
-    await ctx.send("Usa `!points bypass add @usuario 5` o `!points bypass remove @usuario 5`.")
-
-
-@points_command.group(name="ss", invoke_without_command=True)
-async def points_ss_group(ctx):
-    await ctx.send("Usa `!points ss add @usuario 5` o `!points ss remove @usuario 5`.")
-
-
-async def handle_points_bypass(ctx, target, amount, action):
-    if can_manage_points(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+@bot.tree.command(name="setupbypass", description="Publica el panel de Bypass Request.")
+async def setupbypass_command(interaction):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
-    if target is None or amount is None:
-        await send_error(ctx, "Usa `!points bypass " + action + " <@usuario o ID> <puntos>`.")
+    if config.BYPASS_CHANNEL_ID == 0:
+        await send_ephemeral(interaction, "⚠️ El canal de bypass no está configurado en el .env.")
         return
-    if amount <= 0:
-        await send_error(ctx, "⚠️ La cantidad de puntos debe ser mayor a 0.")
+    if config.BYPASS_TICKET_CATEGORY_ID == 0:
+        await send_ephemeral(interaction, "⚠️ La categoría de tickets de bypass no está configurada en el .env.")
         return
-    user_id = parse_user_id(target)
-    member = ctx.guild.get_member(user_id)
+    if interaction.channel.id != config.BYPASS_CHANNEL_ID:
+        await send_ephemeral(interaction, "🚫 Este comando solo funciona en el canal de bypass.")
+        return
+    existing = await get_bypass_setup_message(interaction.channel)
+    if existing is not None:
+        await send_ephemeral(interaction, "⚠️ Ya hay un embed de Bypass Request publicado en este canal.")
+        return
+    await interaction.response.send_message(embed=build_bypass_setup_embed(), view=build_bypass_setup_view())
+    category = interaction.guild.get_channel(config.BYPASS_TICKET_CATEGORY_ID)
+    await interaction.followup.send(
+        "✅ Embed publicado. Los tickets se crearán en la categoría **" + category.name + "**.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="bypassban", description="Banea a un usuario de abrir tickets de bypass.")
+@discord.app_commands.describe(usuario="Usuario a banear de los tickets de bypass")
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def bypassban_command(interaction, usuario: str):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
+        return
+    user_id = int(usuario)
+    if database.is_bypass_banned(user_id) == True:
+        await send_ephemeral(interaction, "⚠️ Ese usuario ya está baneado de los tickets de bypass.")
+        return
+    database.add_bypass_ban(user_id)
+    await interaction.response.send_message("✅ Usuario <@" + str(user_id) + "> baneado de los tickets de bypass.")
+
+
+@bot.tree.command(name="bypassunban", description="Quita el ban de bypass a un usuario.")
+@discord.app_commands.describe(usuario="Usuario al que se le quita el ban de bypass")
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def bypassunban_command(interaction, usuario: str):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
+        return
+    user_id = int(usuario)
+    if database.is_bypass_banned(user_id) == False:
+        await send_ephemeral(interaction, "⚠️ Ese usuario no está baneado de los tickets de bypass.")
+        return
+    database.remove_bypass_ban(user_id)
+    await interaction.response.send_message("✅ Usuario <@" + str(user_id) + "> desbaneado de los tickets de bypass.")
+
+
+@bot.tree.command(name="bypasstop", description="Muestra el top de los mejores bypassers.")
+async def bypasstop_command(interaction):
+    embed = build_bypasstop_embed(interaction.guild, interaction.user.id)
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="points", description="Administra los puntos de bypass y de SS.")
+@discord.app_commands.describe(
+    tipo="Tipo de puntos",
+    accion="Sumar o restar puntos",
+    usuario="Usuario al que se le aplican los puntos",
+    cantidad="Cantidad de puntos",
+)
+@discord.app_commands.choices(
+    tipo=[
+        discord.app_commands.Choice(name="bypass", value="bypass"),
+        discord.app_commands.Choice(name="ss", value="ss"),
+    ],
+    accion=[
+        discord.app_commands.Choice(name="add", value="add"),
+        discord.app_commands.Choice(name="remove", value="remove"),
+    ],
+)
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def points_command(interaction, tipo: str, accion: str, usuario: str, cantidad: int):
+    if can_manage_points(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
+        return
+    if cantidad <= 0:
+        await send_ephemeral(interaction, "⚠️ La cantidad de puntos debe ser mayor a 0.")
+        return
+    if tipo == "bypass":
+        await handle_points_bypass(interaction, int(usuario), cantidad, accion)
+        return
+    await handle_points_ss(interaction, int(usuario), cantidad, accion)
+
+
+async def handle_points_bypass(interaction, user_id, amount, action):
+    member = interaction.guild.get_member(user_id)
     if member is None:
-        await send_error(ctx, "⚠️ No se encontró ese usuario en el servidor.")
+        await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
         return
     if action == "add":
         database.add_bypass_points(user_id, amount)
-        await ctx.send("✅ Se sumaron **" + str(amount) + "** puntos de bypass a " + member.mention + ".")
+        await interaction.response.send_message(
+            "✅ Se sumaron **" + str(amount) + "** puntos de bypass a " + member.mention + "."
+        )
         await send_log(
             "Ninguno",
             user_id,
             "Puntos bypass sumados",
-            "**Staff:** <@" + str(ctx.author.id) + ">\n**Puntos:** +" + str(amount),
+            "**Staff:** <@" + str(interaction.user.id) + ">\n**Puntos:** +" + str(amount),
         )
         return
     database.remove_bypass_points(user_id, amount)
-    await ctx.send("✅ Se restaron **" + str(amount) + "** puntos de bypass a " + member.mention + ".")
+    await interaction.response.send_message(
+        "✅ Se restaron **" + str(amount) + "** puntos de bypass a " + member.mention + "."
+    )
     await send_log(
         "Ninguno",
         user_id,
         "Puntos bypass restados",
-        "**Staff:** <@" + str(ctx.author.id) + ">\n**Puntos:** -" + str(amount),
+        "**Staff:** <@" + str(interaction.user.id) + ">\n**Puntos:** -" + str(amount),
     )
 
 
-async def handle_points_ss(ctx, target, amount, action):
-    if can_manage_points(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
-        return
-    if target is None or amount is None:
-        await send_error(ctx, "Usa `!points ss " + action + " <@usuario o ID> <puntos>`.")
-        return
-    if amount <= 0:
-        await send_error(ctx, "⚠️ La cantidad de puntos debe ser mayor a 0.")
-        return
-    user_id = parse_user_id(target)
-    member = ctx.guild.get_member(user_id)
+async def handle_points_ss(interaction, user_id, amount, action):
+    member = interaction.guild.get_member(user_id)
     if member is None:
-        await send_error(ctx, "⚠️ No se encontró ese usuario en el servidor.")
+        await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
         return
     if is_staff(member) == False:
-        await send_error(ctx, "⚠️ Ese usuario no es staff.")
+        await send_ephemeral(interaction, "⚠️ Ese usuario no es staff.")
         return
     now = int(time.time())
     if action == "add":
         database.add_activity_adjustment(member.id, amount, now)
-        await ctx.send("✅ Se sumaron **" + str(amount) + "** puntos de SS a " + member.mention + ".")
+        await interaction.response.send_message(
+            "✅ Se sumaron **" + str(amount) + "** puntos de SS a " + member.mention + "."
+        )
         await send_log(
             "Ninguno",
             member.id,
             "Puntos SS sumados",
-            "**Staff:** <@" + str(ctx.author.id) + ">\n**Puntos:** +" + str(amount),
+            "**Staff:** <@" + str(interaction.user.id) + ">\n**Puntos:** +" + str(amount),
         )
         return
     database.add_activity_adjustment(member.id, amount * -1, now)
-    await ctx.send("✅ Se restaron **" + str(amount) + "** puntos de SS a " + member.mention + ".")
+    await interaction.response.send_message(
+        "✅ Se restaron **" + str(amount) + "** puntos de SS a " + member.mention + "."
+    )
     await send_log(
         "Ninguno",
         member.id,
         "Puntos SS restados",
-        "**Staff:** <@" + str(ctx.author.id) + ">\n**Puntos:** -" + str(amount),
+        "**Staff:** <@" + str(interaction.user.id) + ">\n**Puntos:** -" + str(amount),
     )
 
 
-@points_bypass_group.command(name="add")
-async def points_bypass_add_command(ctx, target: str = None, amount: int = None):
-    await handle_points_bypass(ctx, target, amount, "add")
+class ResultProofsForm(discord.ui.Modal, title="Pruebas del test"):
+    def __init__(self, ticket):
+        super().__init__()
+        self.ticket = ticket
+        minimum = 0
+        required = False
+        if ticket["difficulty"] == "bypass":
+            minimum = 1
+            required = True
+        self.proofs = discord.ui.Label(
+            text="Pruebas",
+            description="Subí las fotos de las pruebas (hasta 10)",
+            component=discord.ui.FileUpload(max_values=10, min_values=minimum, required=required),
+        )
+        self.add_item(self.proofs)
+
+    async def on_submit(self, interaction):
+        await save_result_proofs(interaction, self.ticket, self.proofs.component.values)
 
 
-@points_bypass_group.command(name="remove")
-async def points_bypass_remove_command(ctx, target: str = None, amount: int = None):
-    await handle_points_bypass(ctx, target, amount, "remove")
-
-
-@points_ss_group.command(name="add")
-async def points_ss_add_command(ctx, target: str = None, amount: int = None):
-    await handle_points_ss(ctx, target, amount, "add")
-
-
-@points_ss_group.command(name="remove")
-async def points_ss_remove_command(ctx, target: str = None, amount: int = None):
-    await handle_points_ss(ctx, target, amount, "remove")
-
-
-@bot.command(name="result", description="Registra las pruebas del test y abre el formulario del resultado.")
-async def result_command(ctx):
-    if is_staff(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+async def save_result_proofs(interaction, ticket, proofs):
+    channel = interaction.channel
+    proof_files = []
+    for attachment in proofs:
+        proof_files.append(await attachment.to_file())
+    if ticket["difficulty"] == "bypass":
+        result_sessions[channel.id] = {
+            "ticket_id": ticket["id"],
+            "proofs": proofs,
+            "tester_id": interaction.user.id,
+            "kind": "bypass",
+        }
+        await send_ephemeral(interaction, "✅ Pruebas registradas.")
+        await channel.send(
+            content="📎 **Pruebas subidas:** fotos de las pruebas\n<@" + str(interaction.user.id) + ">",
+            files=proof_files,
+            view=build_bypass_proofs_view(channel.id),
+        )
+        await send_log(
+            channel.mention,
+            ticket["user_id"],
+            "Pruebas bypass subidas",
+            "**Staff:** <@" + str(interaction.user.id) + ">\n"
+            "**Cantidad de imágenes:** " + str(len(proofs)),
+        )
         return
-    ticket = database.get_open_ticket_by_channel(ctx.channel.id)
+    result_sessions[channel.id] = {
+        "ticket_id": ticket["id"],
+        "proofs": proofs,
+        "tester_id": interaction.user.id,
+        "difficulty": ticket["difficulty"],
+        "kind": "ss",
+    }
+    if len(proofs) == 0:
+        await send_ephemeral(interaction, "✅ Test registrado sin pruebas.")
+        await channel.send(
+            content="🧪 **Test registrado sin pruebas**\n<@" + str(interaction.user.id) + ">",
+            view=build_result_proofs_view(channel.id),
+        )
+    else:
+        await send_ephemeral(interaction, "✅ Pruebas registradas.")
+        await channel.send(
+            content="📎 **Pruebas subidas:** fotos de las pruebas\n<@" + str(interaction.user.id) + ">",
+            files=proof_files,
+            view=build_result_proofs_view(channel.id),
+        )
+    await send_log(
+        channel.mention,
+        ticket["user_id"],
+        "Pruebas SS subidas",
+        "**Staff:** <@" + str(interaction.user.id) + ">\n"
+        "**Dificultad:** " + DIFFICULTY_NAMES[ticket["difficulty"]] + "\n"
+        "**Cantidad de imágenes:** " + str(len(proofs)),
+    )
+
+
+@bot.tree.command(name="result", description="Registra las pruebas del test y abre el formulario del resultado.")
+async def result_command(interaction):
+    if is_staff(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    ticket = database.get_open_ticket_by_channel(interaction.channel.id)
     if ticket is None:
-        await send_error(ctx, "Este canal no es un ticket abierto.")
+        await send_ephemeral(interaction, "Este canal no es un ticket abierto.")
         return
     if ticket["difficulty"] == "bypass":
         if config.BYPASS_RESULT_CHANNEL_ID == 0:
-            await send_error(ctx, "⚠️ El canal de resultados de bypass no está configurado en el .env.")
+            await send_ephemeral(interaction, "⚠️ El canal de resultados de bypass no está configurado en el .env.")
             return
         if get_normal_channel(config.BYPASS_RESULT_CHANNEL_ID) is None:
-            await send_error(
-                ctx,
+            await send_ephemeral(
+                interaction,
                 "⚠️ No se encontró el canal de resultados de bypass en el servidor. "
                 "Revisa BYPASS_RESULT_CHANNEL_ID en el .env.",
             )
             return
     else:
         if config.RESULT_CHANNEL_ID == 0:
-            await send_error(ctx, "⚠️ El canal de resultados no está configurado en el .env.")
+            await send_ephemeral(interaction, "⚠️ El canal de resultados no está configurado en el .env.")
             return
         if get_staff_channel(config.RESULT_CHANNEL_ID) is None:
-            await send_error(
-                ctx,
+            await send_ephemeral(
+                interaction,
                 "⚠️ No se encontró el canal de resultados de SS en el servidor de staff. "
                 "Revisa RESULT_CHANNEL_ID en el .env.",
             )
             return
         if config.SS_RESULT_DISCORD_PUBLIC == 0:
-            await send_error(ctx, "⚠️ El canal público de resultados de SS no está configurado en el .env.")
+            await send_ephemeral(interaction, "⚠️ El canal público de resultados de SS no está configurado en el .env.")
             return
         if get_normal_channel(config.SS_RESULT_DISCORD_PUBLIC) is None:
-            await send_error(
-                ctx,
+            await send_ephemeral(
+                interaction,
                 "⚠️ No se encontró el canal público de resultados de SS en el servidor. "
                 "Revisa SS_RESULT_DISCORD_PUBLIC en el .env.",
             )
             return
-    images = get_message_images(ctx.message)
-    if len(images) == 0 and ticket["difficulty"] == "bypass":
-        await send_error(ctx, "⚠️ Adjunta las fotos de las pruebas en el mismo mensaje del comando.")
-        return
-    proof_files = []
-    for attachment in images:
-        proof_files.append(await attachment.to_file())
-    if ticket["difficulty"] == "bypass":
-        result_sessions[ctx.channel.id] = {
-            "ticket_id": ticket["id"],
-            "proofs": images,
-            "tester_id": ctx.author.id,
-            "kind": "bypass",
-        }
-        await ctx.channel.send(
-            content="📎 **Pruebas subidas:** fotos de las pruebas\n<@" + str(ctx.author.id) + ">",
-            files=proof_files,
-            view=build_bypass_proofs_view(ctx.channel.id),
-        )
-        await send_log(
-            ctx.channel.mention,
-            ticket["user_id"],
-            "Pruebas bypass subidas",
-            "**Staff:** <@" + str(ctx.author.id) + ">\n"
-            "**Cantidad de imágenes:** " + str(len(images)),
-        )
-        return
-    result_sessions[ctx.channel.id] = {
-        "ticket_id": ticket["id"],
-        "proofs": images,
-        "tester_id": ctx.author.id,
-        "difficulty": ticket["difficulty"],
-        "kind": "ss",
-    }
-    if len(images) == 0:
-        await ctx.channel.send(
-            content="🧪 **Test registrado sin pruebas**\n<@" + str(ctx.author.id) + ">",
-            view=build_result_proofs_view(ctx.channel.id),
-        )
-    else:
-        await ctx.channel.send(
-            content="📎 **Pruebas subidas:** fotos de las pruebas\n<@" + str(ctx.author.id) + ">",
-            files=proof_files,
-            view=build_result_proofs_view(ctx.channel.id),
-        )
-    await send_log(
-        ctx.channel.mention,
-        ticket["user_id"],
-        "Pruebas SS subidas",
-        "**Staff:** <@" + str(ctx.author.id) + ">\n"
-        "**Dificultad:** " + DIFFICULTY_NAMES[ticket["difficulty"]] + "\n"
-        "**Cantidad de imágenes:** " + str(len(images)),
-    )
+    await interaction.response.send_modal(ResultProofsForm(ticket))
 
 
-@bot.hybrid_command(name="unclaim", description="Retira el claim del ticket actual.")
-async def unclaim_command(ctx):
-    await defer_if_interaction(ctx)
-    if is_staff(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+@bot.tree.command(name="unclaim", description="Retira el claim del ticket actual.")
+async def unclaim_command(interaction):
+    if is_staff(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
-    ticket = database.get_open_ticket_by_channel(ctx.channel.id)
+    ticket = database.get_open_ticket_by_channel(interaction.channel.id)
     if ticket is None:
-        await send_error(ctx, "Este canal no es un ticket abierto.")
+        await send_ephemeral(interaction, "Este canal no es un ticket abierto.")
         return
     if ticket["claimed_by"] is None:
-        await send_error(ctx, "⚠️ Este ticket no tiene un claim activo.")
+        await send_ephemeral(interaction, "⚠️ Este ticket no tiene un claim activo.")
         return
     old_claim = ticket["claimed_by"]
     points = DIFFICULTY_POINTS[ticket["difficulty"]]
     database.unclaim_ticket(ticket["id"])
     database.remove_activity(ticket["id"])
     creator = await bot.fetch_user(ticket["user_id"])
-    ticket_message = await get_ticket_message(ctx.channel)
+    ticket_message = await get_ticket_message(interaction.channel)
     await ticket_message.edit(
         embed=build_ticket_embed(
             ticket["user_id"],
@@ -1682,47 +1679,50 @@ async def unclaim_command(ctx):
         ),
         view=build_ticket_view(False),
     )
-    await ctx.send(
+    await interaction.response.send_message(
         "✅ Claim retirado a <@" + str(old_claim) + ">. Puntos restados: **" + str(points) + "**."
     )
     await send_log(
-        ctx.channel.mention,
+        interaction.channel.mention,
         ticket["user_id"],
         "Ticket unclameado",
         "**Staff que reclamó:** <@" + str(old_claim) + ">\n"
-        "**Staff que ejecutó el unclaim:** <@" + str(ctx.author.id) + ">\n"
+        "**Staff que ejecutó el unclaim:** <@" + str(interaction.user.id) + ">\n"
         "**Puntos restados:** " + str(points),
     )
 
 
-@bot.hybrid_command(name="remember", description="Envía un recordatorio por MD al creador del ticket.")
-async def remember_command(ctx):
-    await defer_if_interaction(ctx)
-    if is_staff(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+@bot.tree.command(name="remember", description="Envía un recordatorio por MD al creador del ticket.")
+async def remember_command(interaction):
+    if is_staff(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
-    ticket = database.get_open_ticket_by_channel(ctx.channel.id)
+    ticket = database.get_open_ticket_by_channel(interaction.channel.id)
     if ticket is None:
-        await send_error(ctx, "Este canal no es un ticket abierto.")
+        await send_ephemeral(interaction, "Este canal no es un ticket abierto.")
         return
     user = await bot.fetch_user(ticket["user_id"])
     thumbnail_name = os.path.basename(config.REMINDER_THUMBNAIL)
-    embed = build_reminder_embed(thumbnail_name, ctx.channel.id)
+    embed = build_reminder_embed(thumbnail_name, interaction.channel.id)
     await user.send(embed=embed, file=discord.File(config.REMINDER_THUMBNAIL))
-    await ctx.send("📩 Recordatorio enviado por MD a " + user.mention + ".")
+    await interaction.response.send_message("📩 Recordatorio enviado por MD a " + user.mention + ".")
 
 
-@bot.hybrid_command(name="cooldown", description="Muestra el cooldown de un usuario.")
-async def cooldown_command(ctx, target: str = None):
-    await defer_if_interaction(ctx)
-    if target is None:
-        user_id = ctx.author.id
+@bot.tree.command(name="cooldown", description="Muestra el cooldown de un usuario.")
+@discord.app_commands.describe(usuario="Usuario a consultar (por defecto sos vos)")
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def cooldown_command(interaction, usuario: str = None):
+    if usuario is None:
+        user_id = interaction.user.id
     else:
-        user_id = parse_user_id(target)
-    member = ctx.guild.get_member(user_id)
+        if usuario.isdigit() == False:
+            await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
+            return
+        user_id = int(usuario)
+    member = interaction.guild.get_member(user_id)
     if member is None:
         embed = discord.Embed(title="Cooldown", description="No se encontró ese usuario en el servidor.", color=discord.Color.purple())
-        await send_error(ctx, embed=embed)
+        await send_ephemeral(interaction, embed=embed)
         return
     row = database.get_cooldown(user_id)
     seconds_left = get_cooldown_seconds_left(user_id)
@@ -1731,28 +1731,29 @@ async def cooldown_command(ctx, target: str = None):
     embed.add_field(name="Usuario", value=member.mention, inline=False)
     if row is None or seconds_left == 0:
         embed.add_field(name="Estado", value="Sin cooldown activo", inline=False)
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
         return
     embed.add_field(name="Estado", value="Cooldown activo", inline=False)
     embed.add_field(name="⏳ Tiempo restante", value=format_remaining(seconds_left), inline=True)
     embed.add_field(name="📅 Termina", value=format_date(row["cooldown_end"]), inline=True)
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 
-@bot.hybrid_command(name="removecooldown", description="Quita el cooldown de un usuario.")
-async def removecooldown_command(ctx, target: str = None):
-    await defer_if_interaction(ctx)
-    if is_admin(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+@bot.tree.command(name="removecooldown", description="Quita el cooldown de un usuario.")
+@discord.app_commands.describe(usuario="Usuario al que se le quita el cooldown")
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def removecooldown_command(interaction, usuario: str):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
-    if target is None:
-        await send_error(ctx, "Indica el ID o la mención del usuario. Ejemplo: `!removecooldown @usuario`.")
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
         return
-    user_id = parse_user_id(target)
-    member = ctx.guild.get_member(user_id)
+    user_id = int(usuario)
+    member = interaction.guild.get_member(user_id)
     if member is None:
         embed = discord.Embed(title="Quitar cooldown", description="No se encontró ese usuario en el servidor.", color=discord.Color.purple())
-        await send_error(ctx, embed=embed)
+        await send_ephemeral(interaction, embed=embed)
         return
     row = database.get_cooldown(user_id)
     if row is None:
@@ -1760,7 +1761,7 @@ async def removecooldown_command(ctx, target: str = None):
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.add_field(name="Usuario", value=member.mention, inline=False)
         embed.add_field(name="Estado", value="No tenía un cooldown activo", inline=False)
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
         return
     old_end = row["cooldown_end"]
     await remove_cooldown_role(member)
@@ -1770,38 +1771,42 @@ async def removecooldown_command(ctx, target: str = None):
     embed.add_field(name="Usuario", value=member.mention, inline=False)
     embed.add_field(name="Estado", value="Cooldown removido", inline=False)
     embed.add_field(name="📅 Terminaba", value=format_date(old_end), inline=False)
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
     await send_log(
         "Ninguno",
         user_id,
         "Cooldown removido",
-        "**Staff:** <@" + str(ctx.author.id) + ">\n**Terminaba:** " + format_date(old_end),
+        "**Staff:** <@" + str(interaction.user.id) + ">\n**Terminaba:** " + format_date(old_end),
     )
 
 
-@bot.hybrid_command(name="addcooldown", description="Aplica un cooldown a un usuario.")
-async def addcooldown_command(ctx, target: str = None, duration: str = None):
-    await defer_if_interaction(ctx)
-    if is_admin(ctx.author) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+@bot.tree.command(name="addcooldown", description="Aplica un cooldown a un usuario.")
+@discord.app_commands.describe(
+    usuario="Usuario al que se le aplica el cooldown",
+    duracion="Duración del cooldown: 7d, 12h, 30m",
+)
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def addcooldown_command(interaction, usuario: str, duracion: str):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
-    if target is None or duration is None:
-        await send_error(ctx, "Uso: `!addcooldown @usuario 7d`. Formatos válidos: `7d`, `12h`, `30m`.")
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
         return
-    user_id = parse_user_id(target)
-    member = ctx.guild.get_member(user_id)
+    user_id = int(usuario)
+    member = interaction.guild.get_member(user_id)
     if member is None:
         embed = discord.Embed(title="Aplicar cooldown", description="No se encontró ese usuario en el servidor.", color=discord.Color.purple())
-        await send_error(ctx, embed=embed)
+        await send_ephemeral(interaction, embed=embed)
         return
-    seconds = parse_duration(duration.split())
+    seconds = parse_duration(duracion.split())
     if seconds <= 0:
-        await send_error(ctx, "La duración no es válida. Ejemplo: `!addcooldown @usuario 7d`.")
+        await send_ephemeral(interaction, "La duración no es válida. Usá formatos como `7d`, `12h` o `30m`.")
         return
     cooldown_end = int(time.time()) + seconds
     database.set_cooldown(user_id, cooldown_end)
     if member.get_role(config.COOLDOWN_ROLE_ID) is None:
-        cooldown_role = ctx.guild.get_role(config.COOLDOWN_ROLE_ID)
+        cooldown_role = interaction.guild.get_role(config.COOLDOWN_ROLE_ID)
         await member.add_roles(cooldown_role)
     asyncio.create_task(expire_cooldown(user_id, seconds, cooldown_end))
     embed = discord.Embed(title="Aplicar cooldown", color=discord.Color.purple())
@@ -1809,12 +1814,12 @@ async def addcooldown_command(ctx, target: str = None, duration: str = None):
     embed.add_field(name="Usuario", value=member.mention, inline=False)
     embed.add_field(name="⏳ Tiempo aplicado", value=format_remaining(seconds), inline=True)
     embed.add_field(name="📅 Termina", value=format_date(cooldown_end), inline=True)
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
     await send_log(
         "Ninguno",
         user_id,
         "Cooldown aplicado",
-        "**Staff:** <@" + str(ctx.author.id) + ">\n**Duración:** " + format_remaining(seconds),
+        "**Staff:** <@" + str(interaction.user.id) + ">\n**Duración:** " + format_remaining(seconds),
     )
 
 
@@ -1833,40 +1838,38 @@ async def daily_activity_task():
     await send_activity_report(channel)
 
 
-@bot.hybrid_command(name="actividad", description="Muestra la actividad del staff.")
-async def activity_command(ctx):
-    await defer_if_interaction(ctx)
-    if ctx.guild.id != config.STAFF_GUILD_ID:
-        if is_staff(ctx.author) == False:
-            await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+@bot.tree.command(name="actividad", description="Muestra la actividad del staff.")
+async def activity_command(interaction):
+    if interaction.guild_id != config.STAFF_GUILD_ID:
+        if is_staff(interaction.user) == False:
+            await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
             return
-    await send_activity_report(ctx.channel)
+    await interaction.response.defer(ephemeral=True)
+    await send_activity_report(interaction.channel)
+    await interaction.followup.send("✅ Reporte de actividad enviado.", ephemeral=True)
 
 
-@bot.hybrid_command(name="clear", description="Elimina una cantidad de mensajes del canal actual.")
-async def clear_command(ctx, number: int = None):
-    await defer_if_interaction(ctx)
+@bot.tree.command(name="clear", description="Elimina una cantidad de mensajes del canal actual.")
+@discord.app_commands.describe(numero="Cantidad de mensajes a eliminar (máximo 50)")
+async def clear_command(interaction, numero: int):
     normal_guild = get_normal_guild()
     normal_member = None
     if normal_guild is not None:
-        normal_member = normal_guild.get_member(ctx.author.id)
+        normal_member = normal_guild.get_member(interaction.user.id)
     if normal_member is None:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if is_admin(normal_member) == False:
-        await send_error(ctx, "🚫 No estás autorizado para usar este comando.")
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
-    if number is None:
-        await send_error(ctx, "⚠️ Uso: `!clear <número>` (máximo 50).")
+    if numero < 1:
+        await send_ephemeral(interaction, "⚠️ El número tiene que ser mayor a 0.")
         return
-    if number < 1:
-        await send_error(ctx, "⚠️ El número tiene que ser mayor a 0.")
+    if numero > 50:
+        await send_ephemeral(interaction, "⚠️ El máximo es 50 mensajes.")
         return
-    if number > 50:
-        await send_error(ctx, "⚠️ El máximo es 50 mensajes.")
-        return
-    deleted = await ctx.channel.purge(limit=number)
-    await send_private(ctx, "🧹 Se eliminaron " + str(len(deleted)) + " mensajes.")
+    deleted = await interaction.channel.purge(limit=numero)
+    await send_ephemeral(interaction, "🧹 Se eliminaron " + str(len(deleted)) + " mensajes.")
 
 
 database.init_database()
