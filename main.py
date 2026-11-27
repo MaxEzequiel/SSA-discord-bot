@@ -42,6 +42,10 @@ DIFFICULTY_POINTS = {
 
 MAX_WITHOUT_POINTS = 5
 
+MAX_STRIKES = 3
+WARNS_PER_STRIKE = 5
+MIN_WEEKLY_POINTS = 5
+
 PASS_TEST_NAMES = {
     "si": "Sí",
     "no": "No",
@@ -281,6 +285,81 @@ def get_staff_members(guild):
         if is_staff(member) == True:
             members.append(member)
     return members
+
+
+def get_strike_channel():
+    return get_staff_channel(config.STRIKE_CHANNEL_ID)
+
+
+def format_strike_count(strikes):
+    shown = strikes
+    if shown > MAX_STRIKES:
+        shown = MAX_STRIKES
+    return str(shown) + "/" + str(MAX_STRIKES)
+
+
+async def notify_strike(user_id, strikes, reason):
+    channel = get_strike_channel()
+    if channel is None:
+        return
+    await channel.send("<@" + str(user_id) + "> " + format_strike_count(strikes) + " — " + reason)
+
+
+async def expel_staff(user_id):
+    staff_guild = bot.get_guild(config.STAFF_GUILD_ID)
+    if staff_guild is not None:
+        staff_member = staff_guild.get_member(user_id)
+        if staff_member is not None:
+            await staff_member.kick(reason="Llegó a " + str(MAX_STRIKES) + " strikes")
+    guild = get_normal_guild()
+    if guild is None:
+        return
+    member = guild.get_member(user_id)
+    if member is None:
+        return
+    roles = []
+    for role_id in config.STAFF_ROLE_IDS:
+        role = guild.get_role(role_id)
+        if role is not None:
+            if member.get_role(role_id) is not None:
+                roles.append(role)
+    if len(roles) > 0:
+        await member.remove_roles(*roles)
+
+
+async def add_strikes(user_id, amount, reason):
+    row = database.get_staff_counts(user_id)
+    warns = 0
+    strikes = 0
+    if row is not None:
+        warns = row["warns"]
+        strikes = row["strikes"]
+    start = strikes
+    strikes = strikes + amount
+    database.set_staff_counts(user_id, warns, strikes)
+    database.add_strike_history(user_id, "strike", amount, reason, int(time.time()))
+    for index in range(amount):
+        await notify_strike(user_id, start + index + 1, reason)
+    if strikes >= MAX_STRIKES:
+        await expel_staff(user_id)
+    return strikes
+
+
+async def add_warns(user_id, amount, reason):
+    row = database.get_staff_counts(user_id)
+    warns = 0
+    strikes = 0
+    if row is not None:
+        warns = row["warns"]
+        strikes = row["strikes"]
+    warns = warns + amount
+    new_strikes = warns // WARNS_PER_STRIKE
+    warns = warns - (new_strikes * WARNS_PER_STRIKE)
+    database.set_staff_counts(user_id, warns, strikes)
+    database.add_strike_history(user_id, "warn", amount, reason, int(time.time()))
+    if new_strikes > 0:
+        await add_strikes(user_id, new_strikes, reason)
+    return warns
 
 
 def build_setup_embed():
@@ -540,6 +619,21 @@ def build_activity_embeds(members, week_rows, month_rows):
         if len(month_chunks) > 1:
             name = name + " (" + str(index + 1) + "/" + str(len(month_chunks)) + ")"
         embed.add_field(name=name, value=month_chunks[index], inline=False)
+        embeds.append(embed)
+    return embeds
+
+
+def build_single_activity_embeds(title, label, members, rows):
+    chunks = split_lines_into_chunks(build_activity_lines(members, rows), 1000)
+    embeds = []
+    for index in range(len(chunks)):
+        embed = discord.Embed(color=discord.Color.purple())
+        if index == 0:
+            embed.title = title
+        name = label
+        if len(chunks) > 1:
+            name = name + " (" + str(index + 1) + "/" + str(len(chunks)) + ")"
+        embed.add_field(name=name, value=chunks[index], inline=False)
         embeds.append(embed)
     return embeds
 
@@ -1360,6 +1454,8 @@ async def on_ready():
     cooldowns_restored = True
     await restore_cooldowns()
     daily_activity_task.start()
+    weekly_activity_task.start()
+    monthly_activity_task.start()
     print("Bot conectado como " + str(bot.user))
 
 
@@ -1867,6 +1963,64 @@ async def daily_activity_task():
     await send_activity_report(channel)
 
 
+async def run_weekly_inactivity_check():
+    guild = get_normal_guild()
+    if guild is None:
+        return
+    rows = database.get_activity_points_since(get_week_start())
+    points_by_staff = {}
+    for row in rows:
+        points_by_staff[row["staff_id"]] = row["total"]
+    staff_role = guild.get_role(config.STAFF_ROLE_ID)
+    if staff_role is None:
+        return
+    for member in staff_role.members:
+        if member.bot == True:
+            continue
+        if database.is_activity_bypassed(member.id) == True:
+            continue
+        points = 0
+        if member.id in points_by_staff:
+            points = points_by_staff[member.id]
+        if points < MIN_WEEKLY_POINTS:
+            await add_strikes(
+                member.id,
+                1,
+                "Inactividad semanal (menos de " + str(MIN_WEEKLY_POINTS) + " puntos)",
+            )
+
+
+@tasks.loop(time=ACTIVITY_SCHEDULE)
+async def weekly_activity_task():
+    now = datetime.now(timezone.utc)
+    if now.weekday() != 6:
+        return
+    channel = get_staff_channel(config.WEEKLY_ACTIVITY_CHANNEL_ID)
+    if channel is not None:
+        guild = get_normal_guild()
+        members = get_staff_members(guild)
+        rows = database.get_activity_points_since(get_week_start())
+        embeds = build_single_activity_embeds("Actividad semanal final", "📅 Semanal", members, rows)
+        await send_activity_embeds(channel, embeds)
+    await run_weekly_inactivity_check()
+
+
+@tasks.loop(time=ACTIVITY_SCHEDULE)
+async def monthly_activity_task():
+    now = datetime.now(timezone.utc)
+    tomorrow = now + timedelta(days=1)
+    if tomorrow.month == now.month:
+        return
+    channel = get_staff_channel(config.MONTHLY_ACTIVITY_CHANNEL_ID)
+    if channel is None:
+        return
+    guild = get_normal_guild()
+    members = get_staff_members(guild)
+    rows = database.get_activity_points_since(get_month_start())
+    embeds = build_single_activity_embeds("Actividad mensual final", "🗓️ Mensual", members, rows)
+    await send_activity_embeds(channel, embeds)
+
+
 @bot.tree.command(name="actividad", description="Muestra la actividad del staff.")
 @discord.app_commands.guilds(*COMMAND_GUILDS)
 async def activity_command(interaction):
@@ -1901,6 +2055,183 @@ async def clear_command(interaction, numero: int):
         return
     deleted = await interaction.channel.purge(limit=numero)
     await send_ephemeral(interaction, "🧹 Se eliminaron " + str(len(deleted)) + " mensajes.")
+
+
+@bot.tree.command(name="warn", description="Suma warns a un staff. Cada 5 warns es un strike.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
+@discord.app_commands.describe(
+    usuario="Staff al que se le suman los warns",
+    cantidad="Cantidad de warns a sumar",
+    razon="Razón del warn",
+)
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def warn_command(interaction, usuario: str, cantidad: int, razon: str):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
+        return
+    if cantidad <= 0:
+        await send_ephemeral(interaction, "⚠️ La cantidad de warns debe ser mayor a 0.")
+        return
+    user_id = int(usuario)
+    member = interaction.guild.get_member(user_id)
+    if member is None:
+        await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
+        return
+    await add_warns(user_id, cantidad, razon)
+    row = database.get_staff_counts(user_id)
+    await interaction.response.send_message(
+        "✅ Se sumaron **" + str(cantidad) + "** warns a " + member.mention + ".\n"
+        "**Warns:** " + str(row["warns"]) + "/" + str(WARNS_PER_STRIKE) + "\n"
+        "**Strikes:** " + format_strike_count(row["strikes"])
+    )
+
+
+@bot.tree.command(name="strike", description="Suma un strike a un staff.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
+@discord.app_commands.describe(
+    usuario="Staff al que se le suma el strike",
+    razon="Razón del strike",
+)
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def strike_command(interaction, usuario: str, razon: str):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
+        return
+    user_id = int(usuario)
+    member = interaction.guild.get_member(user_id)
+    if member is None:
+        await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
+        return
+    strikes = await add_strikes(user_id, 1, razon)
+    text = (
+        "✅ Se sumó **1** strike a " + member.mention + ".\n"
+        "**Strikes:** " + format_strike_count(strikes)
+    )
+    if strikes >= MAX_STRIKES:
+        text = text + "\n🚪 Fue expulsado del staff."
+    await interaction.response.send_message(text)
+
+
+@bot.tree.command(name="strikeremove", description="Quita strikes a un staff.")
+@discord.app_commands.guilds(*COMMAND_GUILDS)
+@discord.app_commands.describe(
+    usuario="Staff al que se le quitan los strikes",
+    cantidad="Cantidad de strikes a quitar",
+)
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def strikeremove_command(interaction, usuario: str, cantidad: int):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
+        return
+    if cantidad <= 0:
+        await send_ephemeral(interaction, "⚠️ La cantidad tiene que ser mayor a 0.")
+        return
+    user_id = int(usuario)
+    member = interaction.guild.get_member(user_id)
+    if member is None:
+        await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
+        return
+    row = database.get_staff_counts(user_id)
+    warns = 0
+    strikes = 0
+    if row is not None:
+        warns = row["warns"]
+        strikes = row["strikes"]
+    strikes = strikes - cantidad
+    if strikes < 0:
+        strikes = 0
+    database.set_staff_counts(user_id, warns, strikes)
+    database.add_strike_history(
+        user_id,
+        "strike_remove",
+        cantidad,
+        "Quitados por <@" + str(interaction.user.id) + ">",
+        int(time.time()),
+    )
+    await interaction.response.send_message(
+        "✅ Se quitaron **" + str(cantidad) + "** strikes a " + member.mention + ".\n"
+        "**Strikes:** " + format_strike_count(strikes)
+    )
+
+
+bypass_activity_group = discord.app_commands.Group(
+    name="bypassactivity",
+    description="Excluye staff de los strikes por inactividad.",
+)
+
+
+@bypass_activity_group.command(name="add", description="Excluye a un staff de los strikes por inactividad.")
+@discord.app_commands.describe(usuario="Staff a excluir")
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def bypass_activity_add(interaction, usuario: str):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
+        return
+    user_id = int(usuario)
+    member = interaction.guild.get_member(user_id)
+    if member is None:
+        await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
+        return
+    database.add_activity_bypass(user_id)
+    await interaction.response.send_message(
+        "✅ " + member.mention + " ya no recibe strikes por inactividad."
+    )
+
+
+@bypass_activity_group.command(name="remove", description="Vuelve a incluir a un staff en los strikes por inactividad.")
+@discord.app_commands.describe(usuario="Staff a incluir de nuevo")
+@discord.app_commands.autocomplete(usuario=member_autocomplete)
+async def bypass_activity_remove(interaction, usuario: str):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    if usuario.isdigit() == False:
+        await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
+        return
+    user_id = int(usuario)
+    member = interaction.guild.get_member(user_id)
+    if member is None:
+        await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
+        return
+    database.remove_activity_bypass(user_id)
+    await interaction.response.send_message(
+        "✅ " + member.mention + " vuelve a recibir strikes por inactividad."
+    )
+
+
+@bypass_activity_group.command(name="list", description="Muestra los staff exentos de los strikes por inactividad.")
+async def bypass_activity_list(interaction):
+    if is_admin(interaction.user) == False:
+        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
+        return
+    rows = database.get_activity_bypass_list()
+    if len(rows) == 0:
+        await send_ephemeral(interaction, "No hay staff exento de inactividad.")
+        return
+    lines = []
+    for row in rows:
+        lines.append("<@" + str(row["user_id"]) + ">")
+    embed = discord.Embed(
+        title="Staff exento de inactividad",
+        description=shorten_text("\n".join(lines), 1900),
+        color=discord.Color.purple(),
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+bot.tree.add_command(bypass_activity_group, guilds=COMMAND_GUILDS)
 
 
 database.init_database()

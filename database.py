@@ -75,6 +75,25 @@ def init_database():
         "decided_at INTEGER, "
         "created_at INTEGER)"
     )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS staff_counts ("
+        "user_id INTEGER PRIMARY KEY, "
+        "warns INTEGER, "
+        "strikes INTEGER)"
+    )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS strike_history ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "user_id INTEGER, "
+        "kind TEXT, "
+        "amount INTEGER, "
+        "reason TEXT, "
+        "created_at INTEGER)"
+    )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS activity_bypass ("
+        "user_id INTEGER PRIMARY KEY)"
+    )
     connection.commit()
 
 
@@ -348,3 +367,66 @@ def set_pending_result_status(result_id, status, decided_by, decided_at):
         (status, decided_by, decided_at, result_id),
     )
     connection.commit()
+
+
+def get_staff_counts(user_id):
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT * FROM staff_counts WHERE user_id = ?",
+        (user_id,),
+    )
+    return cursor.fetchone()
+
+
+def set_staff_counts(user_id, warns, strikes):
+    cursor = connection.cursor()
+    cursor.execute(
+        "INSERT OR REPLACE INTO staff_counts (user_id, warns, strikes) VALUES (?, ?, ?)",
+        (user_id, warns, strikes),
+    )
+    connection.commit()
+
+
+def add_strike_history(user_id, kind, amount, reason, created_at):
+    cursor = connection.cursor()
+    cursor.execute(
+        "INSERT INTO strike_history (user_id, kind, amount, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+        (user_id, kind, amount, reason, created_at),
+    )
+    connection.commit()
+
+
+def add_activity_bypass(user_id):
+    cursor = connection.cursor()
+    cursor.execute(
+        "INSERT OR IGNORE INTO activity_bypass (user_id) VALUES (?)",
+        (user_id,),
+    )
+    connection.commit()
+
+
+def remove_activity_bypass(user_id):
+    cursor = connection.cursor()
+    cursor.execute(
+        "DELETE FROM activity_bypass WHERE user_id = ?",
+        (user_id,),
+    )
+    connection.commit()
+
+
+def is_activity_bypassed(user_id):
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT user_id FROM activity_bypass WHERE user_id = ?",
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return False
+    return True
+
+
+def get_activity_bypass_list():
+    cursor = connection.cursor()
+    cursor.execute("SELECT user_id FROM activity_bypass ORDER BY user_id ASC")
+    return cursor.fetchall()
