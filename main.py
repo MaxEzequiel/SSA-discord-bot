@@ -100,10 +100,41 @@ def can_manage_points(member):
     return has_any_role(member, config.POINTS_ROLE_IDS)
 
 
+def get_normal_member(user_id):
+    guild = get_normal_guild()
+    if guild is None:
+        return None
+    return guild.get_member(user_id)
+
+
+def is_normal_staff(user):
+    member = get_normal_member(user.id)
+    if member is None:
+        return False
+    return is_staff(member)
+
+
+def is_normal_admin(user):
+    member = get_normal_member(user.id)
+    if member is None:
+        return False
+    return is_admin(member)
+
+
+def can_manage_normal_points(user):
+    member = get_normal_member(user.id)
+    if member is None:
+        return False
+    return can_manage_points(member)
+
+
 async def member_autocomplete(interaction, current):
+    guild = get_normal_guild()
+    if guild is None:
+        return []
     choices = []
     current_lower = current.lower()
-    for member in interaction.guild.members:
+    for member in guild.members:
         if current_lower in member.name.lower():
             choices.append(discord.app_commands.Choice(name=member.name, value=str(member.id)))
         elif current_lower in member.display_name.lower():
@@ -1294,7 +1325,7 @@ class ResultFormStepTwo(discord.ui.Modal, title="Resultado del test (2/2)"):
 
 
 async def handle_continue_result(interaction):
-    if is_staff(interaction.user) == False:
+    if is_normal_staff(interaction.user) == False:
         await interaction.response.send_message(
             "🚫 No estás autorizado para finalizar el test.",
             ephemeral=True,
@@ -1323,7 +1354,7 @@ async def handle_continue_result(interaction):
 
 
 async def handle_finish_result(interaction):
-    if is_staff(interaction.user) == False:
+    if is_normal_staff(interaction.user) == False:
         await interaction.response.send_message(
             "🚫 No estás autorizado para finalizar el test.",
             ephemeral=True,
@@ -1384,7 +1415,7 @@ class BypassResultForm(discord.ui.Modal, title="Resultado del bypass"):
 
 
 async def handle_finish_bypass_result(interaction):
-    if is_staff(interaction.user) == False:
+    if is_normal_staff(interaction.user) == False:
         await interaction.response.send_message(
             "🚫 No estás autorizado para finalizar el test.",
             ephemeral=True,
@@ -1462,7 +1493,7 @@ async def on_ready():
 @bot.tree.command(name="setupss", description="Publica el panel de SS Request.")
 @discord.app_commands.guilds(*COMMAND_GUILDS)
 async def setupss_command(interaction):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if interaction.channel.id != config.SS_GUIDE_CHANNEL_ID:
@@ -1483,7 +1514,7 @@ async def setupss_command(interaction):
 @bot.tree.command(name="setupbypass", description="Publica el panel de Bypass Request.")
 @discord.app_commands.guilds(*COMMAND_GUILDS)
 async def setupbypass_command(interaction):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if config.BYPASS_CHANNEL_ID == 0:
@@ -1512,7 +1543,7 @@ async def setupbypass_command(interaction):
 @discord.app_commands.describe(usuario="Usuario a banear de los tickets de bypass")
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def bypassban_command(interaction, usuario: str):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
@@ -1531,7 +1562,7 @@ async def bypassban_command(interaction, usuario: str):
 @discord.app_commands.describe(usuario="Usuario al que se le quita el ban de bypass")
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def bypassunban_command(interaction, usuario: str):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
@@ -1548,7 +1579,7 @@ async def bypassunban_command(interaction, usuario: str):
 @bot.tree.command(name="bypasstop", description="Muestra el top de los mejores bypassers.")
 @discord.app_commands.guilds(*COMMAND_GUILDS)
 async def bypasstop_command(interaction):
-    embed = build_bypasstop_embed(interaction.guild, interaction.user.id)
+    embed = build_bypasstop_embed(get_normal_guild(), interaction.user.id)
     await interaction.response.send_message(embed=embed)
 
 
@@ -1572,7 +1603,7 @@ async def bypasstop_command(interaction):
 )
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def points_command(interaction, tipo: str, accion: str, usuario: str, cantidad: int):
-    if can_manage_points(interaction.user) == False:
+    if can_manage_normal_points(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
@@ -1588,7 +1619,7 @@ async def points_command(interaction, tipo: str, accion: str, usuario: str, cant
 
 
 async def handle_points_bypass(interaction, user_id, amount, action):
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
         return
@@ -1617,7 +1648,7 @@ async def handle_points_bypass(interaction, user_id, amount, action):
 
 
 async def handle_points_ss(interaction, user_id, amount, action):
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
         return
@@ -1728,7 +1759,7 @@ async def save_result_proofs(interaction, ticket, proofs):
 @bot.tree.command(name="result", description="Registra las pruebas del test y abre el formulario del resultado.")
 @discord.app_commands.guilds(*COMMAND_GUILDS)
 async def result_command(interaction):
-    if is_staff(interaction.user) == False:
+    if is_normal_staff(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     ticket = database.get_open_ticket_by_channel(interaction.channel.id)
@@ -1773,7 +1804,7 @@ async def result_command(interaction):
 @bot.tree.command(name="unclaim", description="Retira el claim del ticket actual.")
 @discord.app_commands.guilds(*COMMAND_GUILDS)
 async def unclaim_command(interaction):
-    if is_staff(interaction.user) == False:
+    if is_normal_staff(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     ticket = database.get_open_ticket_by_channel(interaction.channel.id)
@@ -1816,7 +1847,7 @@ async def unclaim_command(interaction):
 @bot.tree.command(name="remember", description="Envía un recordatorio por MD al creador del ticket.")
 @discord.app_commands.guilds(*COMMAND_GUILDS)
 async def remember_command(interaction):
-    if is_staff(interaction.user) == False:
+    if is_normal_staff(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     ticket = database.get_open_ticket_by_channel(interaction.channel.id)
@@ -1842,7 +1873,7 @@ async def cooldown_command(interaction, usuario: str = None):
             await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
             return
         user_id = int(usuario)
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         embed = discord.Embed(title="Cooldown", description="No se encontró ese usuario en el servidor.", color=discord.Color.purple())
         await send_ephemeral(interaction, embed=embed)
@@ -1867,14 +1898,14 @@ async def cooldown_command(interaction, usuario: str = None):
 @discord.app_commands.describe(usuario="Usuario al que se le quita el cooldown")
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def removecooldown_command(interaction, usuario: str):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
         await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
         return
     user_id = int(usuario)
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         embed = discord.Embed(title="Quitar cooldown", description="No se encontró ese usuario en el servidor.", color=discord.Color.purple())
         await send_ephemeral(interaction, embed=embed)
@@ -1912,14 +1943,14 @@ async def removecooldown_command(interaction, usuario: str):
 )
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def addcooldown_command(interaction, usuario: str, duracion: str):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
         await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
         return
     user_id = int(usuario)
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         embed = discord.Embed(title="Aplicar cooldown", description="No se encontró ese usuario en el servidor.", color=discord.Color.purple())
         await send_ephemeral(interaction, embed=embed)
@@ -2025,7 +2056,7 @@ async def monthly_activity_task():
 @discord.app_commands.guilds(*COMMAND_GUILDS)
 async def activity_command(interaction):
     if interaction.guild_id != config.STAFF_GUILD_ID:
-        if is_staff(interaction.user) == False:
+        if is_normal_staff(interaction.user) == False:
             await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
             return
     await interaction.response.defer(ephemeral=True)
@@ -2037,14 +2068,7 @@ async def activity_command(interaction):
 @discord.app_commands.guilds(*COMMAND_GUILDS)
 @discord.app_commands.describe(numero="Cantidad de mensajes a eliminar (máximo 50)")
 async def clear_command(interaction, numero: int):
-    normal_guild = get_normal_guild()
-    normal_member = None
-    if normal_guild is not None:
-        normal_member = normal_guild.get_member(interaction.user.id)
-    if normal_member is None:
-        await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
-        return
-    if is_admin(normal_member) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if numero < 1:
@@ -2066,7 +2090,7 @@ async def clear_command(interaction, numero: int):
 )
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def warn_command(interaction, usuario: str, cantidad: int, razon: str):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
@@ -2076,7 +2100,7 @@ async def warn_command(interaction, usuario: str, cantidad: int, razon: str):
         await send_ephemeral(interaction, "⚠️ La cantidad de warns debe ser mayor a 0.")
         return
     user_id = int(usuario)
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
         return
@@ -2097,14 +2121,14 @@ async def warn_command(interaction, usuario: str, cantidad: int, razon: str):
 )
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def strike_command(interaction, usuario: str, razon: str):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
         await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
         return
     user_id = int(usuario)
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
         return
@@ -2126,7 +2150,7 @@ async def strike_command(interaction, usuario: str, razon: str):
 )
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def strikeremove_command(interaction, usuario: str, cantidad: int):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
@@ -2136,7 +2160,7 @@ async def strikeremove_command(interaction, usuario: str, cantidad: int):
         await send_ephemeral(interaction, "⚠️ La cantidad tiene que ser mayor a 0.")
         return
     user_id = int(usuario)
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
         return
@@ -2173,14 +2197,14 @@ bypass_activity_group = discord.app_commands.Group(
 @discord.app_commands.describe(usuario="Staff a excluir")
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def bypass_activity_add(interaction, usuario: str):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
         await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
         return
     user_id = int(usuario)
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
         return
@@ -2194,14 +2218,14 @@ async def bypass_activity_add(interaction, usuario: str):
 @discord.app_commands.describe(usuario="Staff a incluir de nuevo")
 @discord.app_commands.autocomplete(usuario=member_autocomplete)
 async def bypass_activity_remove(interaction, usuario: str):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     if usuario.isdigit() == False:
         await send_ephemeral(interaction, "⚠️ Elegí un usuario de la lista.")
         return
     user_id = int(usuario)
-    member = interaction.guild.get_member(user_id)
+    member = get_normal_member(user_id)
     if member is None:
         await send_ephemeral(interaction, "⚠️ No se encontró ese usuario en el servidor.")
         return
@@ -2213,7 +2237,7 @@ async def bypass_activity_remove(interaction, usuario: str):
 
 @bypass_activity_group.command(name="list", description="Muestra los staff exentos de los strikes por inactividad.")
 async def bypass_activity_list(interaction):
-    if is_admin(interaction.user) == False:
+    if is_normal_admin(interaction.user) == False:
         await send_ephemeral(interaction, "🚫 No estás autorizado para usar este comando.")
         return
     rows = database.get_activity_bypass_list()
